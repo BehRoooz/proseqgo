@@ -3,7 +3,7 @@ data:
   # FASTA source used by scripts/embed_sequences.py
   train_fasta: "data/cafa-5-protein-function-prediction/Train/train_sequences.fasta"
   embeddings_dir: "data/embeddings"
-  embeddings_source: "ESM2"        # ESM2 | ProtBERT | T5
+  embeddings_source: "ESM2"        # ESM2 
   num_labels: 500
   train_val_split: 0.9
   # Holdout split for quick offline evaluation (from labeled protein IDs)
@@ -13,10 +13,10 @@ data:
 embedding:
   # HF encoder backend to use for embedding generation.
   # If omitted, scripts will fall back to `data.embeddings_source`.
-  backend: "esm2"                 # esm2 | prot_bert | prot_t5
+  backend: "esm2"                 # esm2
   hf_cache_dir: "data/hf_cache"
   pooling: "mean"               # mean | cls
-  max_length: 1280             # ESM2: 1280 | ProtBERT: 1024 | T5: 1024
+  max_length: 1280             # ESM2: 1280 
   batch_size: 8
   fp16: true
   num_workers: 0
