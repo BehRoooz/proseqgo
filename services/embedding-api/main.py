@@ -14,7 +14,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, CollectorRegistry
 
-from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH, GO_PREDICTION_API_URL
+from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH, GO_PREDICTION_API_URL, MAX_FASTA_UPLOAD_BYTES
 from job_store import JobStore
 from schemas import (
     CreateJobRequest,
@@ -324,6 +324,81 @@ def _predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResp
 def predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResponse:
     return _predict_go_for_job(job_id, request)
 
+def _parse_and_validate_fasta(fasta_text: str, backend: str) -> None:
+    try:
+        ids, sequences = parse_fasta_text(fasta_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    empty_ids = [seq_id for seq_id, seq in zip(ids, sequences) if not seq.strip()]
+    if empty_ids:
+        preview = ", ".join(empty_ids[:5])
+        suffix = "..." if len(empty_ids) > 5 else ""
+        raise HTTPException(
+            status_code=400,
+            detail=f"FASTA records with empty sequences: {preview}{suffix}",
+        )
+    _observe_sequence_lengths(backend=backend, sequences=sequences)
+
+
+def _validate_predict_form_params(
+    *,
+    batch_size: int,
+    max_length: int,
+    top_k: int,
+    timeout_seconds: int,
+    poll_interval_seconds: float,
+) -> None:
+    if not 1 <= batch_size <= 128:
+        raise HTTPException(status_code=400, detail="batch_size must be between 1 and 128")
+    if not 8 <= max_length <= 8192:
+        raise HTTPException(status_code=400, detail="max_length must be between 8 and 8192")
+    if not 1 <= top_k <= 500:
+        raise HTTPException(status_code=400, detail="top_k must be between 1 and 500")
+    if not 5 <= timeout_seconds <= 7200:
+        raise HTTPException(status_code=400, detail="timeout_seconds must be between 5 and 7200")
+    if not 0.1 < poll_interval_seconds <= 5.0:
+        raise HTTPException(
+            status_code=400,
+            detail="poll_interval_seconds must be greater than 0.1 and at most 5.0",
+        )
+
+
+async def _read_fasta_upload(fasta_file: UploadFile) -> str:
+    raw = await fasta_file.read(MAX_FASTA_UPLOAD_BYTES + 1)
+    if len(raw) > MAX_FASTA_UPLOAD_BYTES:
+        max_mb = MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"FASTA_FILE_TOO_LARGE: max {max_mb} MB",
+        )
+    fasta_text = raw.decode("utf-8", errors="replace")
+    if not fasta_text.strip():
+        raise HTTPException(status_code=400, detail="Uploaded FASTA is empty.")
+    return fasta_text
+
+
+def _predict_go_from_job_payload(
+    job_payload: dict,
+    *,
+    top_k: int,
+    indices: list[int] | None,
+    fail_fast: bool,
+    timeout_seconds: int,
+    poll_interval_seconds: float,
+) -> PredictGoResponse:
+    job_id = str(uuid.uuid4())
+    store.create_job(job_id, job_payload)
+    _wait_for_job_completion(
+        job_id=job_id,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    return _predict_go_for_job(
+        job_id=job_id,
+        request=PredictGoRequest(top_k=top_k, indices=indices, fail_fast=fail_fast),
+    )
+
+
 # wait for job completion endpoint to wait for a job to complete
 def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_seconds: float) -> None:
     deadline = time.time() + timeout_seconds
@@ -346,7 +421,6 @@ def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> Predict
         backend=request.backend,
         sequences=[seq.sequence for seq in request.sequences],
     )
-    job_id = str(uuid.uuid4())
     job_payload = {
         "stage": "test",
         "backend": request.backend,
@@ -355,13 +429,51 @@ def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> Predict
         "max_length": request.max_length,
         "sequences": [seq.model_dump() for seq in request.sequences],
     }
-    store.create_job(job_id, job_payload)
-    _wait_for_job_completion(
-        job_id=job_id,
+    return _predict_go_from_job_payload(
+        job_payload,
+        top_k=request.top_k,
+        indices=request.indices,
+        fail_fast=request.fail_fast,
         timeout_seconds=request.timeout_seconds,
         poll_interval_seconds=request.poll_interval_seconds,
     )
-    return _predict_go_for_job(
-        job_id=job_id,
-        request=PredictGoRequest(top_k=request.top_k, indices=request.indices, fail_fast=request.fail_fast),
+
+
+@app.post(API_PREFIX + "/predict-go-from-fasta", response_model=PredictGoResponse)
+async def predict_go_from_fasta(
+    fasta_file: UploadFile = File(...),
+    backend: Literal["esm2", "protbert", "t5"] = Form(default="esm2"),
+    pooling: Literal["mean", "cls"] = Form(default="mean"),
+    batch_size: int = Form(default=8),
+    max_length: int = Form(default=1280),
+    top_k: int = Form(default=10),
+    fail_fast: bool = Form(default=True),
+    timeout_seconds: int = Form(default=1800),
+    poll_interval_seconds: float = Form(default=1.0),
+) -> PredictGoResponse:
+    _validate_predict_form_params(
+        batch_size=batch_size,
+        max_length=max_length,
+        top_k=top_k,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    fasta_text = await _read_fasta_upload(fasta_file)
+    _parse_and_validate_fasta(fasta_text, backend)
+
+    job_payload = {
+        "stage": "test",
+        "backend": backend,
+        "pooling": pooling,
+        "batch_size": batch_size,
+        "max_length": max_length,
+        "fasta_text": fasta_text,
+    }
+    return _predict_go_from_job_payload(
+        job_payload,
+        top_k=top_k,
+        indices=None,
+        fail_fast=fail_fast,
+        timeout_seconds=timeout_seconds,
+        poll_interval_seconds=poll_interval_seconds,
     )

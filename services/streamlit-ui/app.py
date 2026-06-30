@@ -16,9 +16,15 @@ PROJECT_DESCRIPTION = (
     "Interactive sequence-to-GO inference UI backed by the embedding and GO "
     "prediction APIs through the NGINX gateway."
 )
-DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "https://localhost")
-PREDICT_ENDPOINT = "/api/v1/predict-go-from-sequences"
+DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost")
+PREDICT_SEQUENCES_ENDPOINT = "/api/v1/predict-go-from-sequences"
+PREDICT_FASTA_ENDPOINT = "/api/v1/predict-go-from-fasta"
 MAX_TOP_K = 500
+MAX_FASTA_UPLOAD_BYTES = 5 * 1024 * 1024  # must match embedding-api config + nginx route
+SEQUENCE_TIMEOUT_SECONDS = 600
+FASTA_TIMEOUT_SECONDS = 1800
+PREDICTION_MODE_SEQUENCE = "Prediction with sequence"
+PREDICTION_MODE_FASTA = "Prediction with FASTA"
 AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
 WORKFLOW_DOT = """
 digraph cafa5 {
@@ -26,13 +32,13 @@ digraph cafa5 {
     node [shape=box, style=rounded];
     user [label="User Browser"];
     ui [label="Streamlit UI (/ui/)"];
-    gw [label="NGINX Gateway (HTTPS)"];
+    gw [label="NGINX Gateway"];
     api [label="Embedding API"];
     pred [label="GO Prediction API"];
 
     user -> ui;
     ui -> gw [label="Basic Auth"];
-    gw -> api [label="/api/v1/predict-go-from-sequences"];
+    gw -> api [label="predict-go-from-sequences\\nor predict-go-from-fasta"];
     api -> pred [label="predict()"];
     pred -> api;
     api -> ui;
@@ -55,6 +61,32 @@ def validate_sequence(sequence: str) -> tuple[bool, str]:
             "Sequence includes invalid symbols. Allowed amino acids: ACDEFGHIKLMNPQRSTVWY.",
         )
     return True, ""
+
+
+def validate_fasta_upload(file_bytes: bytes, filename: str) -> tuple[bool, str]:
+    if not file_bytes:
+        return False, "Uploaded FASTA file is empty."
+    if len(file_bytes) > MAX_FASTA_UPLOAD_BYTES:
+        max_mb = MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)
+        return False, f"FASTA file exceeds the {max_mb} MB upload limit."
+    try:
+        fasta_text = file_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return False, "FASTA file must be valid UTF-8 text."
+    if not fasta_text.strip():
+        return False, "Uploaded FASTA file contains no sequence data."
+    record_count = sum(1 for line in fasta_text.splitlines() if line.startswith(">"))
+    if record_count == 0:
+        return False, "FASTA file has no records (lines starting with '>')."
+    return True, ""
+
+
+def validate_gateway_auth(gateway_base_url: str, username: str, password: str) -> str | None:
+    if not gateway_base_url.strip():
+        return "Gateway base URL is required."
+    if not username.strip() or not password:
+        return "Both API username and password are required."
+    return None
 
 
 def parse_error_message(response: requests.Response) -> str:
@@ -90,12 +122,56 @@ def call_prediction_api(
     timeout_seconds: int,
 ) -> tuple[bool, dict[str, Any] | str]:
     payload = build_request_payload(sequence=sequence, top_k=top_k)
-    endpoint = f"{gateway_base_url.rstrip('/')}{PREDICT_ENDPOINT}"
+    endpoint = f"{gateway_base_url.rstrip('/')}{PREDICT_SEQUENCES_ENDPOINT}"
 
     try:
         response = requests.post(
             endpoint,
             json=payload,
+            auth=HTTPBasicAuth(username, password),
+            verify=verify_tls,
+            timeout=timeout_seconds,
+        )
+    except RequestException as exc:
+        return False, f"Request failed before receiving a response: {exc}"
+
+    if response.status_code != 200:
+        return False, f"API returned HTTP {response.status_code}: {parse_error_message(response)}"
+
+    try:
+        return True, response.json()
+    except ValueError as exc:
+        return False, f"API returned non-JSON success response: {exc}"
+
+
+def call_fasta_prediction_api(
+    gateway_base_url: str,
+    username: str,
+    password: str,
+    file_bytes: bytes,
+    filename: str,
+    top_k: int,
+    verify_tls: bool,
+    timeout_seconds: int,
+) -> tuple[bool, dict[str, Any] | str]:
+    endpoint = f"{gateway_base_url.rstrip('/')}{PREDICT_FASTA_ENDPOINT}"
+    files = {"fasta_file": (filename or "upload.fasta", file_bytes, "application/octet-stream")}
+    data = {
+        "backend": "esm2",
+        "pooling": "mean",
+        "batch_size": "8",
+        "max_length": "1280",
+        "top_k": str(top_k),
+        "fail_fast": "true",
+        "timeout_seconds": str(timeout_seconds),
+        "poll_interval_seconds": "1.0",
+    }
+
+    try:
+        response = requests.post(
+            endpoint,
+            files=files,
+            data=data,
             auth=HTTPBasicAuth(username, password),
             verify=verify_tls,
             timeout=timeout_seconds,
@@ -139,6 +215,18 @@ def render_predictions(payload: dict[str, Any]) -> None:
         st.json(failures)
 
 
+def _render_shared_connection_fields(
+    gateway_base_url: str,
+    verify_tls_default: bool,
+) -> tuple[str, str, str, bool, int]:
+    top_k = st.number_input("top_k", min_value=1, max_value=MAX_TOP_K, value=10, step=1)
+    gateway_base_url_input = st.text_input("Gateway base URL", value=gateway_base_url)
+    username = st.text_input("API username")
+    password = st.text_input("API password", type="password")
+    verify_tls = st.checkbox("Verify TLS", value=verify_tls_default)
+    return gateway_base_url_input, username, password, verify_tls, int(top_k)
+
+
 def main() -> None:
     st.set_page_config(page_title="CAFA-5 UI", page_icon="🧬", layout="wide")
     st.title("🧬 CAFA-5 Sequence-to-GO Prediction UI")
@@ -147,7 +235,7 @@ def main() -> None:
     st.subheader("Platform Links")
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.markdown("- [MLflow](https://localhost/mlflow/)")
+        st.markdown("- [MLflow](http://localhost/mlflow/)")
     with c2:
         st.markdown("- [Prometheus](http://localhost:9090)")
     with c3:
@@ -157,44 +245,103 @@ def main() -> None:
     st.graphviz_chart(WORKFLOW_DOT, use_container_width=True)
 
     st.subheader("Predict GO Terms")
-    with st.form("predict_form"):
-        sequence_text = st.text_area(
-            "Protein sequence",
-            height=180,
-            placeholder="Paste a single protein sequence (FASTA header excluded).",
+    prediction_mode = st.radio(
+        "Input mode",
+        options=[PREDICTION_MODE_SEQUENCE, PREDICTION_MODE_FASTA],
+        horizontal=True,
+    )
+    verify_tls_default = DEFAULT_GATEWAY_URL.startswith("https://")
+
+    if prediction_mode == PREDICTION_MODE_SEQUENCE:
+        with st.form("predict_sequence_form"):
+            sequence_text = st.text_area(
+                "Protein sequence",
+                height=180,
+                placeholder="Paste a single protein sequence (FASTA header excluded).",
+            )
+            gateway_base_url, username, password, verify_tls, top_k = _render_shared_connection_fields(
+                DEFAULT_GATEWAY_URL,
+                verify_tls_default,
+            )
+            submit = st.form_submit_button("Run prediction")
+
+        if not submit:
+            return
+
+        cleaned = normalize_sequence(sequence_text)
+        is_valid, message = validate_sequence(cleaned)
+        if not is_valid:
+            st.error(message)
+            return
+        auth_error = validate_gateway_auth(gateway_base_url, username, password)
+        if auth_error:
+            st.error(auth_error)
+            return
+
+        with st.spinner(f"Submitting request to {PREDICT_SEQUENCES_ENDPOINT} ..."):
+            ok, result = call_prediction_api(
+                gateway_base_url=gateway_base_url.strip(),
+                username=username.strip(),
+                password=password,
+                sequence=cleaned,
+                top_k=top_k,
+                verify_tls=verify_tls,
+                timeout_seconds=SEQUENCE_TIMEOUT_SECONDS,
+            )
+    else:
+        with st.form("predict_fasta_form"):
+            fasta_file = st.file_uploader(
+                "Protein FASTA file",
+                type=["fasta", "fa", "txt"],
+                help=(
+                    f"Upload a UTF-8 FASTA file (max {MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)} MB). "
+                    "All records in the file are embedded and predicted. "
+                    "Non-canonical residues are normalized by the API at embedding time."
+                ),
+            )
+            gateway_base_url, username, password, verify_tls, top_k = _render_shared_connection_fields(
+                DEFAULT_GATEWAY_URL,
+                verify_tls_default,
+            )
+            submit = st.form_submit_button("Run prediction")
+
+        if not submit:
+            return
+
+        if fasta_file is None:
+            st.error("Select a FASTA file before running prediction.")
+            return
+
+        file_bytes = fasta_file.getvalue()
+        is_valid, message = validate_fasta_upload(file_bytes, fasta_file.name)
+        if not is_valid:
+            st.error(message)
+            return
+        auth_error = validate_gateway_auth(gateway_base_url, username, password)
+        if auth_error:
+            st.error(auth_error)
+            return
+
+        record_count = sum(
+            1 for line in file_bytes.decode("utf-8").splitlines() if line.startswith(">")
         )
-        top_k = st.number_input("top_k", min_value=1, max_value=MAX_TOP_K, value=10, step=1)
-        gateway_base_url = st.text_input("Gateway base URL", value=DEFAULT_GATEWAY_URL)
-        username = st.text_input("API username")
-        password = st.text_input("API password", type="password")
-        verify_tls = st.checkbox("Verify TLS certificates", value=False)
-        submit = st.form_submit_button("Run prediction")
+        if record_count > 1:
+            st.info(
+                f"This FASTA contains {record_count} sequences. "
+                "Large files may take several minutes to complete."
+            )
 
-    if not submit:
-        return
-
-    cleaned = normalize_sequence(sequence_text)
-    is_valid, message = validate_sequence(cleaned)
-    if not is_valid:
-        st.error(message)
-        return
-    if not gateway_base_url.strip():
-        st.error("Gateway base URL is required.")
-        return
-    if not username.strip() or not password:
-        st.error("Both API username and password are required.")
-        return
-
-    with st.spinner("Submitting request to /api/v1/predict-go-from-sequences ..."):
-        ok, result = call_prediction_api(
-            gateway_base_url=gateway_base_url.strip(),
-            username=username.strip(),
-            password=password,
-            sequence=cleaned,
-            top_k=int(top_k),
-            verify_tls=verify_tls,
-            timeout_seconds=600,
-        )
+        with st.spinner(f"Submitting request to {PREDICT_FASTA_ENDPOINT} ..."):
+            ok, result = call_fasta_prediction_api(
+                gateway_base_url=gateway_base_url.strip(),
+                username=username.strip(),
+                password=password,
+                file_bytes=file_bytes,
+                filename=fasta_file.name,
+                top_k=top_k,
+                verify_tls=verify_tls,
+                timeout_seconds=FASTA_TIMEOUT_SECONDS,
+            )
 
     if not ok:
         st.error(str(result))

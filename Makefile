@@ -15,6 +15,10 @@ up:
 down:
 	docker compose down
 
+restart:
+	docker compose down
+	docker compose up -d --build
+
 training-up:
 	docker compose --profile training up -d --build
 
@@ -26,3 +30,9 @@ monitoring-up:
 
 monitoring-down:
 	docker compose --profile monitoring down
+
+up-all:
+	docker compose --profile monitoring up -d --build
+
+down-all:
+	docker compose down

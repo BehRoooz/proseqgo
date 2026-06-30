@@ -135,6 +135,75 @@ curl -o test_embeddings.npy \
   http://127.0.0.1:8000/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
 ```
 
+### 5) Predict GO from sequences (sync)
+
+`POST /api/v1/predict-go-from-sequences` (JSON)
+
+Convenience wrapper: creates an embedding job, waits for completion, then calls the GO prediction API for each sequence. Returns the same `PredictGoResponse` shape as the FASTA variant below.
+
+See the [root README](../../README.md) → **Sequence -> GO in one call** for the full request contract and gateway `curl` example.
+
+### 6) Predict GO from FASTA (sync)
+
+`POST /api/v1/predict-go-from-fasta` (`multipart/form-data`)
+
+Same orchestration as **predict-go-from-sequences** (embed → wait → predict GO), but accepts a FASTA upload instead of a JSON sequence list. `sequence_id` in the response is the first token after `>` in each FASTA header (same parsing as `/jobs/fasta`).
+
+Form fields:
+
+- `fasta_file` (required) — UTF-8 FASTA file
+- `backend` (default `esm2`) — `esm2 | protbert | t5`
+- `pooling` (default `mean`) — `mean | cls`
+- `batch_size` (default `8`) — `1..128`
+- `max_length` (default `1280`) — `8..8192`
+- `top_k` (default `10`) — `1..500`
+- `fail_fast` (default `true`)
+- `timeout_seconds` (default `1800`) — `5..7200` (embedding wait + sequential GO calls)
+- `poll_interval_seconds` (default `1.0`) — `0.1..5.0`
+
+Example (local, no gateway auth):
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/predict-go-from-fasta \
+  -F "fasta_file=@examples/small_sequences.fasta" \
+  -F "backend=esm2" \
+  -F "pooling=mean" \
+  -F "batch_size=2" \
+  -F "max_length=1280" \
+  -F "top_k=10" \
+  -F "fail_fast=true"
+```
+
+Response (`200 OK`, simplified):
+
+```json
+{
+  "job_id": "uuid",
+  "status": "succeeded",
+  "model_version": "12",
+  "top_k": 10,
+  "results": [
+    {
+      "index": 0,
+      "sequence_id": "Q9CQV8",
+      "predictions": [{"go_term": "GO:0000000", "score": 0.82}]
+    }
+  ],
+  "failures": []
+}
+```
+
+**Residue normalization:** Sequences are normalized at embedding time: uppercase, whitespace stripped, canonical amino acids kept, and `X`/`U`/`O`/`B`/`Z`/`J` plus any other unknown symbols mapped to `X` (see `normalize_sequence` in `scripts/embed_sequences.py`). No extra validation is applied in this endpoint beyond FASTA parsing.
+
+**Operational limits:**
+
+- Max FASTA upload: **5 MB** (API enforces after read; NGINX gateway route uses `client_max_body_size 5m`). Uploads larger than the cap return `413` with `FASTA_FILE_TOO_LARGE`.
+- No separate sequence-count cap — only file size is limited. A dense FASTA under 5 MB can still contain many records; GO inference runs sequentially and may hit `504 EMBEDDING_JOB_TIMEOUT` or the overall request timeout.
+- Default sync timeout: **1800 s** (embedding + polling + per-sequence GO calls).
+- For proteome-scale or long-running jobs, use the async path: `POST /api/v1/jobs/fasta` → poll `GET /api/v1/jobs/{job_id}` → `POST /api/v1/jobs/{job_id}/predict-go`.
+
+**Subset prediction:** This endpoint always predicts all parsed FASTA records. To predict a subset by index, use the async job path with `indices` on `POST /api/v1/jobs/{job_id}/predict-go`.
+
 ## Storage layout
 
 - Job DB:

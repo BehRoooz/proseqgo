@@ -13,6 +13,8 @@ RUN pip install --upgrade pip && pip install -r /tmp/requirements-streamlit.txt
 
 COPY services/streamlit-ui /app/services/streamlit-ui
 
+WORKDIR /app/services/streamlit-ui
+
 EXPOSE 8501
 
-CMD ["streamlit", "run", "/app/services/streamlit-ui/app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

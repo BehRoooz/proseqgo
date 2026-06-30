@@ -1,0 +1,3 @@
+[server]
+# Align uploader caption + hard limit with API/nginx FASTA cap (5 MB).
+maxUploadSize = 5

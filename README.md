@@ -124,9 +124,10 @@ make training-up
 - HTTP->HTTPS redirect.
 - Basic auth tiers:
   - Admin routes: `/api/v1/*`, `/api/train*`, `/mlflow/`.
-  - User routes: `/api/predict/*`, `/api/v1/predict-go-from-sequences`.
+  - User routes: `/api/predict/*`, `/api/v1/predict-go-from-sequences`, `/api/v1/predict-go-from-fasta`.
 - Per-route body size controls:
   - `/api/v1/`: 512 MB
+  - `/api/v1/predict-go-from-fasta`: 5 MB
   - `/api/train`: 64 MB
   - `/api/predict/`: 8 MB
   - `/mlflow/`: 32 MB
@@ -199,6 +200,7 @@ All gateway examples below use TLS and basic auth.
   - `/api/v1/jobs/{job_id}/artifacts/{name}`
   - `/api/v1/jobs/{job_id}/predict-go`
   - `/api/v1/predict-go-from-sequences`
+  - `/api/v1/predict-go-from-fasta`
 - GO prediction API (user/admin): `/api/predict/...`
   - `/api/predict/health`
   - `/api/predict/predict`
@@ -266,7 +268,11 @@ print(json.dumps(r.json(), indent=2))
 PY
 ```
 
-### 4) Sequence -> GO in one call (main integration endpoint)
+### 4) Sequence -> GO in one call (main integration endpoints)
+
+Two sync wrappers share the same response contract (`PredictGoResponse`): embed → wait for job completion → call GO prediction API per sequence.
+
+#### Option A: JSON sequences
 
 Endpoint: `POST /api/v1/predict-go-from-sequences`
 
@@ -304,9 +310,38 @@ curl -sk -u USER:USER_PASS -X POST \
   }'
 ```
 
+#### Option B: FASTA upload
+
+Endpoint: `POST /api/v1/predict-go-from-fasta` (`multipart/form-data`)
+
+Form fields mirror the JSON endpoint (`backend`, `pooling`, `batch_size`, `max_length`, `top_k`, `fail_fast`, `timeout_seconds`, `poll_interval_seconds`) plus required `fasta_file`. There is no `indices` form field — all parsed records are predicted. `sequence_id` in results is the first token after `>` in each FASTA header.
+
+Example:
+
+```bash
+curl -sk -u USER:USER_PASS -X POST \
+  https://localhost/api/v1/predict-go-from-fasta \
+  -F "fasta_file=@examples/small_sequences.fasta" \
+  -F "backend=esm2" \
+  -F "pooling=mean" \
+  -F "batch_size=2" \
+  -F "max_length=1280" \
+  -F "top_k=10" \
+  -F "fail_fast=true"
+```
+
+**Residue normalization (both endpoints):** Sequences are normalized at embedding time: uppercase, whitespace stripped, canonical amino acids kept, and `X`/`U`/`O`/`B`/`Z`/`J` plus any other unknown symbols mapped to `X` (see `normalize_sequence` in `scripts/embed_sequences.py`).
+
+**Operational limits:**
+
+- FASTA upload cap: **5 MB** (API + NGINX on `/api/v1/predict-go-from-fasta`). Larger uploads return `413` (`FASTA_FILE_TOO_LARGE`).
+- No sequence-count cap on the FASTA endpoint — only file size. Dense FASTA files may still time out because GO inference is sequential.
+- Default sync timeout: **1800 s** (embedding wait + per-sequence GO calls).
+- Large or proteome-scale jobs: `POST /api/v1/jobs/fasta` → poll → `POST /api/v1/jobs/{job_id}/predict-go`.
+
 What happens internally:
 
-1. `embedding-api` creates and runs an embedding job.
+1. `embedding-api` creates and runs an embedding job (from JSON sequences or parsed FASTA).
 2. It waits for completion with polling (`timeout_seconds`, `poll_interval_seconds`).
 3. It loads generated `test_embeddings.npy`.
 4. For each selected item, it calls `go-prediction-api /predict`.
