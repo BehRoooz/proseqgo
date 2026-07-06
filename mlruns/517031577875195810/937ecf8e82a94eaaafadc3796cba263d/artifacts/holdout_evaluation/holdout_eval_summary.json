@@ -1,6 +1,0 @@
-{
-  "eval_run_id": "937ecf8e82a94eaaafadc3796cba263d",
-  "train_run_id": "2f72548d05084e17afaa1514e56e5694",
-  "holdout_f1_micro": 0.23550641969112412,
-  "holdout_loss_bce": 0.12478669686242938
-}
