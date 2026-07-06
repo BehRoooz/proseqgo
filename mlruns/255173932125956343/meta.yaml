@@ -1,6 +1,0 @@
-artifact_location: mlflow-artifacts:/255173932125956343
-creation_time: 1776335809110
-experiment_id: '255173932125956343'
-last_update_time: 1776335809110
-lifecycle_stage: active
-name: cafa-inference

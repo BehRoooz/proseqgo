@@ -1,5 +1,5 @@
 data:
-  data_dir: "data/cafa-5-protein-function-prediction"
+  data_dir: "data/cafa-5-cafa-6-protein-function-prediction"
   # FASTA source used by scripts/embed_sequences.py
   train_fasta: "data/cafa-5-protein-function-prediction/Train/train_sequences.fasta"
   embeddings_dir: "data/embeddings"
@@ -25,17 +25,17 @@ embedding:
 model:
   type: "cnn1d"                      # mlp | cnn1d
   # MLP-specific
-  mlp_hidden_dims: [864, 712]
+  mlp_hidden_dims: [1024, 2048]
   # CNN-specific
   cnn_out_channels: [3, 8]
   cnn_kernel_size: 3
 
 training:
-  epochs: 20
-  batch_size: 128
+  epochs: 60
+  batch_size: 256
   learning_rate: 0.001
   scheduler_factor: 0.1
-  scheduler_patience: 1
+  scheduler_patience: 3
   seed: 42
 
 prediction:

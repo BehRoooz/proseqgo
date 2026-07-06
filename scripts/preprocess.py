@@ -20,7 +20,7 @@ from src.utils import setup_logger
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Preprocess CAFA-5 labels")
+    parser = argparse.ArgumentParser(description="Preprocess Dataset labels")
     parser.add_argument(
         "--config",
         type=str,

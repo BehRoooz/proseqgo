@@ -27,8 +27,8 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       # Browser URL for MLflow links from GET /api/train/jobs/{id} (via gateway, HTTPS)
       MLFLOW_EXTERNAL_UI_BASE: http://127.0.0.1/mlflow
-      REGISTERED_MODEL_NAME: cafa-go-model
-      PROMOTION_THRESHOLD: "0.35"
+      REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME}
+      PROMOTION_THRESHOLD: ${PROMOTION_THRESHOLD}
     depends_on:
       - mlflow
     volumes:
@@ -72,7 +72,8 @@ services:
       CAFA_DEVICE: auto
       NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      MODEL_URI: models:/cafa-go-model@champion
+      REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME}
+      MODEL_URI: models:/${REGISTERED_MODEL_NAME}@champion
       MODEL_CACHE_DIR: /app/model_cache
     depends_on:
       - mlflow
