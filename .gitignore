@@ -1,56 +1,140 @@
-# Data files
+##########################
+# Data & Outputs
+##########################
 data/
-docs/
 outputs/
 outputs/checkpoints/
+*.h5
+*.hdf5
+*.parquet
+*.csv.gz
+*.npy
+*.npz
 
+##########################
+# Models & Artifacts
+##########################
+models/
+checkpoints/
+*.pt
+*.pth
+*.onnx
+*.pb
+*.ckpt
+*.safetensors
+*.pkl
+*.joblib
+
+##########################
 # Python
+##########################
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.egg-info/
+*.egg
 dist/
 build/
 .eggs/
+*.manifest
+*.spec
 
+##########################
 # Jupyter
+##########################
 .ipynb_checkpoints/
+*.nbconvert.ipynb
 
-# Precomputed arrays
-*.npy
-
-# NGINX secrets (do not commit)
-nginx/.htpasswd
-nginx/.htpasswd-*
-nginx/certs/*.key
-nginx/certs/*.crt
-nginx/certs/*.pem
-
-# Environment
+##########################
+# Environments & Secrets
+##########################
 .env
+.env.*
+*.env
 .venv/
 venv/
 env/
 .cafa5/
+*.pem
+*.key
+*.crt
+secrets/
+credentials/
+*.secret
+*.token
 
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Paper / presentation notes (kept local, not synced)
-notes/
-docs/
-
-# NGINX secrets (do not commit)
+# NGINX secrets
 nginx/.htpasswd
 nginx/.htpasswd-*
 nginx/certs/*.key
 nginx/certs/*.crt
 nginx/certs/*.pem
 
-# MLflow
+# Cloud credentials
+.aws/
+.gcloud/
+*.pem
+service-account*.json
+
+##########################
+# MLOps Tooling
+##########################
 mlruns/
+mlartifacts/
+.dvc/
+.dvc/cache/
+*.dvc.lock
+wandb/
+.neptune/
+.mlflow/
+
+##########################
+# Docker
+##########################
+*.log
+docker-compose.override.yml
+.dockerignore.bak
+
+##########################
+# Infra as Code
+##########################
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+.terraform.lock.hcl
+
+##########################
+# IDE
+##########################
+.vscode/
+.cursor/
+.idea/
+*.swp
+*.swo
+
+##########################
+# OS
+##########################
+.DS_Store
+Thumbs.db
+
+##########################
+# Docs / Notes (local only)
+##########################
+docs/
+notes/
+
+##########################
+# Misc / Future-proofing
+##########################
+*.bak
+*.tmp
+*.orig
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
