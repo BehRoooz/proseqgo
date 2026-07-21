@@ -53,7 +53,6 @@ CAFA-5-MLOps-solution/
 ├── docker/                       # Service-specific Dockerfiles
 ├── docs/                         # Additional project docs
 ├── examples/                     # Example sequences/inputs
-├── mlruns/                       # MLflow file backend store
 ├── monitoring/                   # Prometheus, Grafana provisioning, alert rules
 ├── nginx/                        # Gateway config, TLS certs, htpasswd files
 ├── outputs/                      # Splits, labels, checkpoints, artifacts, submissions
@@ -141,14 +140,17 @@ make training-up
 
 MLflow runs as an internal service and is exposed through gateway path `/mlflow/`.
 
-- Tracking server command:
-  - `mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri file:///mlruns ...`
-- Backend/artifacts storage:
-  - repository-mounted `./mlruns` volume (`/mlruns` in container).
+- **Backend store:** PostgreSQL (`postgres` service, named volume `postgres_data`)
+- **Artifact store:** MinIO S3-compatible bucket `mlflow-artifacts` (named volume `minio_data`)
+- **Tracking URI for clients:** `http://mlflow:5000` (clients need S3 env vars for direct artifact I/O to MinIO)
+- **Secrets:** copy [`.env.example`](.env.example) to `.env` and set Postgres/MinIO credentials before first run
+- **Backups:** `postgres-backup` dumps to `./backups/postgres/` daily; `backup-offload` copies dumps to MinIO bucket `mlflow-db-backups`
 - Model registry:
-  - registered model name defaults to `cafa-go-model`.
+  - registered model name defaults to `cafa-go-model` (override via `REGISTERED_MODEL_NAME` in `.env`).
   - serving API (`go-prediction-api`) loads `models:/cafa-go-model@champion` by default.
 - Training API returns MLflow run/model URLs in job status payload when available.
+
+Legacy file-backed runs (if any) are archived under `archives/` before migration; restore from tarball only for rollback.
 
 ## Monitoring Architecture
 
