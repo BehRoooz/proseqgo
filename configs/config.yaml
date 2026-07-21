@@ -1,7 +1,7 @@
 data:
   data_dir: "data/cafa-5-cafa-6-protein-function-prediction"
   # FASTA source used by scripts/embed_sequences.py
-  train_fasta: "data/cafa-5-protein-function-prediction/Train/train_sequences.fasta"
+  train_fasta: "data/cafa-5-cafa-6-protein-function-prediction/Train/train_sequences.fasta"
   embeddings_dir: "data/embeddings"
   embeddings_source: "ESM2"        # ESM2 
   num_labels: 500
