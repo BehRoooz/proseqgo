@@ -1,5 +1,8 @@
 # requirements.txt for the CAFA-5 MLOps solution
 
+# mlflow 2.13 imports pkg_resources, removed in setuptools>=82 (Feb 2026)
+setuptools<82
+
 # torch >=2.0: install separately in GPU Dockerfiles (cu132 index) or locally as needed
 numpy>=1.24
 pandas>=2.0
@@ -18,3 +21,4 @@ uvicorn>=0.42.0
 python-multipart>=0.0.22
 
 mlflow==2.13.0
+boto3>=1.34

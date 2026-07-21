@@ -1,6 +1,7 @@
 # Integrated stack: Embedding API + GO Prediction API + MLflow + Training API.
 # Single public entry: nginx on port 80. Run from repo root: docker compose up --build
 # Training API: docker compose --profile training up --build
+# Copy .env.example to .env and set secrets before first run.
 networks:
   cafa5:
     driver: bridge
@@ -8,8 +9,133 @@ networks:
 volumes:
   prometheus_data:
   grafana_data:
+  postgres_data:
+  minio_data:
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    networks: [cafa5]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    networks: [cafa5]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    networks: [cafa5]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+      mc mb --ignore-existing local/mlflow-artifacts &&
+      mc mb --ignore-existing local/mlflow-db-backups &&
+      echo 'MinIO buckets ready'
+      "
+    restart: "no"
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/docker_mlflow/Dockerfile
+    image: cafa5-mlflow:local
+    networks: [cafa5]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      MLFLOW_S3_IGNORE_TLS: "true"
+    command: >
+      mlflow server
+      --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      --default-artifact-root ${MLFLOW_ARTIFACT_ROOT}
+      --artifacts-destination ${MLFLOW_ARTIFACT_ROOT}
+      --serve-artifacts
+    restart: unless-stopped
+
+  postgres-backup:
+    image: prodrigestivill/postgres-backup-local:16
+    networks: [cafa5]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SCHEDULE: "@daily"
+      BACKUP_KEEP_DAYS: ${BACKUP_RETENTION_DAYS}
+      BACKUP_KEEP_WEEKS: ${BACKUP_RETENTION_WEEKS}
+      BACKUP_DIR: /backups
+    volumes:
+      - ./backups/postgres:/backups
+    restart: unless-stopped
+
+  backup-offload:
+    image: minio/mc:latest
+    networks: [cafa5]
+    depends_on:
+      minio:
+        condition: service_healthy
+      postgres-backup:
+        condition: service_started
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      BACKUP_OFFLOAD_TARGET: ${BACKUP_OFFLOAD_TARGET}
+      BACKUP_DIR: /backups
+      BACKUP_OFFLOAD_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS}
+    volumes:
+      - ./backups/postgres:/backups:ro
+      - ./scripts/offload_postgres_backup.sh:/offload.sh:ro
+    entrypoint: /bin/sh
+    command: -c "while true; do /offload.sh; sleep 3600; done"
+    restart: unless-stopped
+
   trainer-api:
     build:
       context: .
@@ -25,6 +151,11 @@ services:
       CAFA_DEVICE: auto
       NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      MLFLOW_S3_IGNORE_TLS: "true"
       # Browser URL for MLflow links from GET /api/train/jobs/{id} (via gateway, HTTPS)
       MLFLOW_EXTERNAL_UI_BASE: http://127.0.0.1/mlflow
       REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME}
@@ -34,7 +165,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
-      - ./mlruns:/mlruns
 
   embedding-api:
     build:
@@ -49,8 +179,13 @@ services:
       PYTHONPATH: /app:/app/services/embedding-api
       CAFA_DEVICE: auto
       NVIDIA_VISIBLE_DEVICES: all
-      GO_PREDICTION_API_URL: http://go-prediction-api:8000
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      MLFLOW_S3_IGNORE_TLS: "true"
+      GO_PREDICTION_API_URL: http://go-prediction-api:8000
     depends_on:
       - go-prediction-api
       - mlflow
@@ -72,6 +207,11 @@ services:
       CAFA_DEVICE: auto
       NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: us-east-1
+      MLFLOW_S3_IGNORE_TLS: "true"
       REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME}
       MODEL_URI: models:/${REGISTERED_MODEL_NAME}@champion
       MODEL_CACHE_DIR: /app/model_cache
@@ -91,19 +231,8 @@ services:
       GATEWAY_BASE_URL: http://nginx
     depends_on:
       - embedding-api
-      - go-prediction-api 
+      - go-prediction-api
       - mlflow
-
-  mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.13.0
-    networks: [cafa5]
-    command: >
-      mlflow server --host 0.0.0.0 --port 5000
-      --backend-store-uri file:///mlruns
-      --default-artifact-root file:///mlruns
-      --artifacts-destination file:///mlruns
-    volumes:
-      - ./mlruns:/mlruns
 
   nginx:
     image: nginx:latest

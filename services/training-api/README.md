@@ -100,7 +100,7 @@ Training expects the same artifacts as local CLI training. Prepare these **befor
 
 1. **Labels and splits** — run preprocessing so `outputs/splits/` and label matrices exist.
 2. **Embeddings** — generate train/val/holdout embeddings for the backend in config (e.g. ESM2 under `data/embeddings/`).
-3. **Writable volumes** — `outputs/` and `mlruns/` must be writable inside the container (mounted from the repo in Compose).
+3. **Writable volumes** — `outputs/` must be writable inside the container (mounted from the repo in Compose). MLflow metadata and artifacts are stored in Postgres + MinIO (no local `mlruns/` mount).
 4. **MLflow** — the `mlflow` service must be running (started by default in Compose).
 
 See the [repository README](../../README.md) for the full offline data-prep workflow.
@@ -426,7 +426,9 @@ Set in `docker-compose.yml` for the `trainer-api` service (or export for local r
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MLFLOW_TRACKING_URI` | `file:./mlruns` | MLflow tracking server (Compose: `http://mlflow:5000`) |
+| `MLFLOW_TRACKING_URI` | `http://mlflow:5000` | MLflow tracking server (Postgres backend + MinIO artifacts) |
+| `MLFLOW_S3_ENDPOINT_URL` | `http://minio:9000` | MinIO endpoint for artifact upload/download (trainer + serving containers) |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | from `.env` | MinIO credentials for MLflow S3 artifact store |
 | `MLFLOW_EXTERNAL_UI_BASE` | `http://127.0.0.1:5000` | Browser-reachable MLflow UI base for links in job JSON (Compose: `http://127.0.0.1/mlflow`) |
 | `REGISTERED_MODEL_NAME` | `cafa-go-model` | Model Registry name passed to training scripts |
 | `PROMOTION_THRESHOLD` | `0.35` | Holdout F1 threshold for `champion` promotion (retrain mode) |
@@ -477,7 +479,7 @@ docker compose logs -f trainer-api
 
 ## Security
 
-The Training API runs long GPU jobs and writes to shared `data/`, `outputs/`, and `mlruns/` volumes. In Compose it is reachable only through the NGINX gateway with admin-tier Basic Auth. Do not expose it on a public network without authentication, TLS, and network controls.
+The Training API runs long GPU jobs and writes to shared `data/` and `outputs/` volumes. MLflow state is stored in Postgres/MinIO services. In Compose it is reachable only through the NGINX gateway with admin-tier Basic Auth. Do not expose it on a public network without authentication, TLS, and network controls.
 
 ## Changing the URL prefix
 
