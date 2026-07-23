@@ -137,12 +137,54 @@
           "legend": { "displayMode": "list", "placement": "bottom" }
         }
       },
+      {
+        "id": 18,
+        "type": "timeseries",
+        "title": "RQ Queue Length (Redis)",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+        "targets": [
+          {
+            "expr": "cafa5_rq_queue_length",
+            "legendFormat": "{{queue}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "none", "min": 0 },
+          "overrides": []
+        },
+        "options": {
+          "legend": { "displayMode": "list", "placement": "bottom" }
+        }
+      },
+      {
+        "id": 19,
+        "type": "timeseries",
+        "title": "Redis Memory Used",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 18 },
+        "targets": [
+          {
+            "expr": "redis_memory_used_bytes",
+            "legendFormat": "used",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "bytes", "min": 0 },
+          "overrides": []
+        },
+        "options": {
+          "legend": { "displayMode": "list", "placement": "bottom" }
+        }
+      },
   
       {
         "id": 7,
         "type": "text",
         "title": "Training",
-        "gridPos": { "h": 2, "w": 24, "x": 0, "y": 18 },
+        "gridPos": { "h": 2, "w": 24, "x": 0, "y": 26 },
         "options": {
           "content": "## Training Pipeline",
           "mode": "markdown"
@@ -153,7 +195,7 @@
         "type": "timeseries",
         "title": "Training Queue Depth by Status",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 28 },
         "targets": [
           {
             "expr": "sum by (status) (cafa5_training_queue_jobs)",
@@ -174,7 +216,7 @@
         "type": "barchart",
         "title": "Training Failure Reasons (15m)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 28 },
         "targets": [
           {
             "expr": "sum by (reason) (increase(cafa5_training_subprocess_failures_total{reason=~\"$reason\"}[15m]))",
@@ -195,7 +237,7 @@
         "type": "timeseries",
         "title": "Training Duration P95 by Mode/Status (s)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 28 },
         "targets": [
           {
             "expr": "histogram_quantile(0.95, sum by (le, mode, status) (rate(cafa5_training_job_duration_seconds_bucket{mode=~\"$mode\"}[5m])))",
@@ -216,7 +258,7 @@
         "type": "timeseries",
         "title": "Training Job Outcomes by Mode (15m)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 28 },
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
         "targets": [
           {
             "expr": "sum by (mode, status) (increase(cafa5_training_jobs_total{mode=~\"$mode\"}[15m]))",
@@ -237,7 +279,7 @@
         "id": 12,
         "type": "text",
         "title": "GO Inference",
-        "gridPos": { "h": 2, "w": 24, "x": 0, "y": 36 },
+        "gridPos": { "h": 2, "w": 24, "x": 0, "y": 44 },
         "options": {
           "content": "## GO Inference",
           "mode": "markdown"
@@ -248,7 +290,7 @@
         "type": "timeseries",
         "title": "Inference Latency P95 by Model Version (s)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 38 },
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 46 },
         "targets": [
           {
             "expr": "histogram_quantile(0.95, sum by (le, model_version) (rate(cafa5_inference_duration_seconds_bucket{model_version=~\"$model_version\"}[5m])))",
@@ -269,7 +311,7 @@
         "type": "timeseries",
         "title": "Inference Request Rate by Model/Status",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 38 },
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 46 },
         "targets": [
           {
             "expr": "sum by (model_version, status_code) (rate(cafa5_inference_requests_total{model_version=~\"$model_version\"}[5m]))",
@@ -290,7 +332,7 @@
         "type": "barchart",
         "title": "Input Validation Failures by Reason (15m)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 38 },
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 46 },
         "targets": [
           {
             "expr": "sum by (reason) (increase(cafa5_inference_input_validation_failures_total{reason=~\"$reason\"}[15m]))",
@@ -311,7 +353,7 @@
         "type": "barchart",
         "title": "Top-K Usage (1h)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 46 },
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
         "targets": [
           {
             "expr": "sum by (top_k) (increase(cafa5_inference_top_k_requests_total{top_k=~\"$top_k\"}[1h]))",
@@ -332,7 +374,7 @@
         "type": "timeseries",
         "title": "Inference Error Ratio (5m)",
         "datasource": { "type": "prometheus", "uid": "prometheus" },
-        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 46 },
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 54 },
         "targets": [
           {
             "expr": "sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\"}[5m])), 1e-9)",
