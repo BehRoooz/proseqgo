@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import threading
-import uuid
 import json
 import time
+import uuid
 from pathlib import Path
 from typing import Literal
 from urllib import request as urlrequest
@@ -14,8 +13,15 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, CollectorRegistry
 
-from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH, GO_PREDICTION_API_URL, MAX_FASTA_UPLOAD_BYTES
+from config import (
+    API_PREFIX,
+    ARTIFACT_ROOT,
+    GO_PREDICTION_API_URL,
+    JOBS_DATABASE_URL,
+    MAX_FASTA_UPLOAD_BYTES,
+)
 from job_store import JobStore
+from queueing import enqueue_embedding_job, get_queue
 from schemas import (
     CreateJobRequest,
     CreateJobResponse,
@@ -25,14 +31,11 @@ from schemas import (
     PredictGoResponse,
 )
 from src.utils import get_device_info
-from worker import parse_fasta_text, worker_loop
+from worker import parse_fasta_text, sync_queue_gauges
 
 app = FastAPI(title="Embedding API", version="0.1.0")
 
-# Prometheus metrics for the embedding API
-
-registry = CollectorRegistry() # to store metrics
-
+registry = CollectorRegistry()
 
 SERVICE_NAME = "embedding-api"
 
@@ -66,17 +69,28 @@ EMBEDDING_DIMENSION_MISMATCHES_TOTAL = Counter(
     "Total number of embedding dimension mismatches detected before GO inference.",
     registry=registry,
 )
+# Durable Postgres-backed queue depth (also updated on the worker process registry).
+EMBEDDING_QUEUE_JOBS = Gauge(
+    "cafa5_embedding_queue_jobs",
+    "Embedding jobs currently in each lifecycle state.",
+    labelnames=("status",),
+    registry=registry,
+)
+RQ_QUEUE_LENGTH = Gauge(
+    "cafa5_rq_queue_length",
+    "Redis/RQ queue length for embedding jobs.",
+    labelnames=("queue",),
+    registry=registry,
+)
 
-store = JobStore(DB_PATH)
-stop_event = threading.Event()
-worker_thread: threading.Thread | None = None
+store = JobStore(JOBS_DATABASE_URL)
 
-# observe the sequence lengths for the embedding backend
+
 def _observe_sequence_lengths(backend: str, sequences: list[str]) -> None:
     for sequence in sequences:
         EMBEDDING_SEQUENCE_LENGTH.labels(backend=backend).observe(len(sequence))
 
-# normalize the route labels for the metrics
+
 def _route_label(path: str) -> str:
     if path == "/metrics":
         return "/metrics"
@@ -84,7 +98,23 @@ def _route_label(path: str) -> str:
         return path[len(API_PREFIX) :] or "/"
     return path
 
-# middleware to collect the metrics for the HTTP requests
+
+def _refresh_job_metrics() -> None:
+    for status in ("queued", "running", "succeeded", "failed"):
+        EMBEDDING_QUEUE_JOBS.labels(status=status).set(store.count_jobs_by_status(status))
+    try:
+        queue = get_queue()
+        RQ_QUEUE_LENGTH.labels(queue=queue.name).set(float(queue.count))
+    except Exception:
+        pass
+
+
+def _create_and_enqueue(job_id: str, payload: dict) -> None:
+    store.create_job(job_id, payload)
+    enqueue_embedding_job(job_id)
+    _refresh_job_metrics()
+
+
 @app.middleware("http")
 async def prometheus_http_middleware(request, call_next):
     route = _route_label(request.url.path)
@@ -111,32 +141,26 @@ async def prometheus_http_middleware(request, call_next):
         HTTP_IN_FLIGHT_REQUESTS.labels(service=SERVICE_NAME).dec()
 
 
-# startup event to start the worker thread
 @app.on_event("startup")
 def startup_event() -> None:
-    global worker_thread
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
-    worker_thread = threading.Thread(target=worker_loop, args=(store, stop_event), daemon=True)
-    worker_thread.start()
+    # Ensure schema exists; RQ worker is a separate container.
+    JobStore(JOBS_DATABASE_URL)
+    _refresh_job_metrics()
+    sync_queue_gauges(store)
 
-# shutdown event to stop the worker thread
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    stop_event.set()
-    if worker_thread is not None:
-        worker_thread.join(timeout=2)
 
-# health endpoint to check the status of the API
 @app.get(API_PREFIX + "/health")
 def health() -> dict[str, str | bool]:
     return {"status": "ok", **get_device_info()}
 
-# metrics endpoint to get the metrics for the API
+
 @app.get("/metrics", include_in_schema=False)
 def metrics() -> Response:
+    _refresh_job_metrics()
     return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
-# create job endpoint to create a new job
+
 @app.post(API_PREFIX + "/jobs", response_model=CreateJobResponse, status_code=202)
 def create_job(request: CreateJobRequest) -> CreateJobResponse:
     _observe_sequence_lengths(
@@ -144,14 +168,14 @@ def create_job(request: CreateJobRequest) -> CreateJobResponse:
         sequences=[seq.sequence for seq in request.sequences],
     )
     job_id = str(uuid.uuid4())
-    store.create_job(job_id, request.model_dump())
+    _create_and_enqueue(job_id, request.model_dump())
     return CreateJobResponse(
         job_id=job_id,
         status="queued",
         poll_url=f"{API_PREFIX}/jobs/{job_id}",
     )
 
-# create fasta job endpoint to create a new job from a FASTA file
+
 @app.post(API_PREFIX + "/jobs/fasta", response_model=CreateJobResponse, status_code=202)
 async def create_fasta_job(
     fasta_file: UploadFile = File(...),
@@ -178,14 +202,14 @@ async def create_fasta_job(
         "max_length": max_length,
         "fasta_text": fasta_text,
     }
-    store.create_job(job_id, payload)
+    _create_and_enqueue(job_id, payload)
     return CreateJobResponse(
         job_id=job_id,
         status="queued",
         poll_url=f"{API_PREFIX}/jobs/{job_id}",
     )
 
-# get job endpoint to get the status of a job
+
 @app.get(API_PREFIX + "/jobs/{job_id}", response_model=JobStatusResponse)
 def get_job(job_id: str) -> JobStatusResponse:
     job = store.get_job(job_id)
@@ -204,7 +228,7 @@ def get_job(job_id: str) -> JobStatusResponse:
         artifacts_manifest=artifacts if artifacts else None,
     )
 
-# get artifact endpoint to get an artifact for a job
+
 @app.get(API_PREFIX + "/jobs/{job_id}/artifacts/{name}")
 def get_artifact(job_id: str, name: str):
     job = store.get_job(job_id)
@@ -223,33 +247,33 @@ def get_artifact(job_id: str, name: str):
         raise HTTPException(status_code=404, detail="ARTIFACT_NOT_FOUND")
     return FileResponse(path=str(path), filename=name, media_type="application/octet-stream")
 
-# post go predict endpoint to predict the GO terms for an embedding
+
 def _post_go_predict(embedding: list[float], top_k: int) -> dict:
-    endpoint = f"{GO_PREDICTION_API_URL.rstrip('/')}/predict" # go prediction API endpoint
-    payload = json.dumps({"embedding": embedding, "top_k": top_k}).encode("utf-8") # payload to send to the go prediction API
-    req = urlrequest.Request( # request to the go prediction API
+    endpoint = f"{GO_PREDICTION_API_URL.rstrip('/')}/predict"
+    payload = json.dumps({"embedding": embedding, "top_k": top_k}).encode("utf-8")
+    req = urlrequest.Request(
         endpoint,
         data=payload,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try: # try to predict the GO terms for the embedding
+    try:
         with urlrequest.urlopen(req, timeout=60) as resp:
             body = resp.read().decode("utf-8")
-            return json.loads(body) if body else {} # return the response from the go prediction API
+            return json.loads(body) if body else {}
     except HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace") # error body from the go prediction API
-        raise HTTPException( # raise an HTTP exception if the go prediction API is not reachable
+        err_body = exc.read().decode("utf-8", errors="replace")
+        raise HTTPException(
             status_code=502,
             detail=f"GO_API_HTTP_{exc.code}: {err_body}",
         ) from exc
     except URLError as exc:
-        raise HTTPException( # raise an HTTP exception if the go prediction API is not reachable
+        raise HTTPException(
             status_code=502,
             detail=f"GO_API_UNREACHABLE: {exc.reason}",
         ) from exc
 
-# predict go for job endpoint to predict the GO terms for a job
+
 def _predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResponse:
     job = store.get_job(job_id)
     if job is None:
@@ -319,10 +343,11 @@ def _predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResp
         failures=failures,
     )
 
-# predict go for job endpoint to predict the GO terms for a job
+
 @app.post(API_PREFIX + "/jobs/{job_id}/predict-go", response_model=PredictGoResponse)
 def predict_go_for_job(job_id: str, request: PredictGoRequest) -> PredictGoResponse:
     return _predict_go_for_job(job_id, request)
+
 
 def _parse_and_validate_fasta(fasta_text: str, backend: str) -> None:
     try:
@@ -387,7 +412,7 @@ def _predict_go_from_job_payload(
     poll_interval_seconds: float,
 ) -> PredictGoResponse:
     job_id = str(uuid.uuid4())
-    store.create_job(job_id, job_payload)
+    _create_and_enqueue(job_id, job_payload)
     _wait_for_job_completion(
         job_id=job_id,
         timeout_seconds=timeout_seconds,
@@ -399,7 +424,6 @@ def _predict_go_from_job_payload(
     )
 
 
-# wait for job completion endpoint to wait for a job to complete
 def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_seconds: float) -> None:
     deadline = time.time() + timeout_seconds
     while True:
@@ -414,7 +438,7 @@ def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_se
             raise HTTPException(status_code=504, detail="EMBEDDING_JOB_TIMEOUT")
         time.sleep(poll_interval_seconds)
 
-# predict go from sequences endpoint to predict the GO terms for a list of sequences
+
 @app.post(API_PREFIX + "/predict-go-from-sequences", response_model=PredictGoResponse)
 def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> PredictGoResponse:
     _observe_sequence_lengths(
