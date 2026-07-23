@@ -36,7 +36,7 @@ Redis holds only transient dispatch state. Postgres is the source of truth for `
 On worker startup, orphaned RQ "started" jobs are requeued and any matching Postgres `running` row is reset to `queued`. Acceptance test:
 
 ```bash
-./scripts/test_embedding_worker_crash_recovery.sh
+./tests/smoke/test_embedding_worker_crash_recovery.sh
 ```
 
 ## Requirements
@@ -51,7 +51,7 @@ From the **repository root**, use the project-wide Compose file and smoke test:
 ```bash
 docker compose up --build
 # other terminal:
-chmod +x scripts/smoke_embedding_api.sh && ./scripts/smoke_embedding_api.sh
+chmod +x tests/smoke/smoke_embedding_api.sh && ./tests/smoke/smoke_embedding_api.sh
 ```
 
 See also [../../README.md](../../README.md) → **How to run with Docker** for volumes, output shapes, and manual `curl` examples.

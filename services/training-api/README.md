@@ -60,7 +60,7 @@ Default: one RQ worker processes jobs from `training-jobs` (typically one at a t
 
 ### Crash recovery
 
-Worker startup requeues orphaned RQ started jobs and resets matching Postgres `running` rows to `queued`. See also `scripts/test_embedding_worker_crash_recovery.sh` for the embedding analogue.
+Worker startup requeues orphaned RQ started jobs and resets matching Postgres `running` rows to `queued`. See also `tests/smoke/test_embedding_worker_crash_recovery.sh` for the embedding analogue.
 
 ## Training vs retraining
 

@@ -57,6 +57,8 @@ CAFA-5-MLOps-solution/
 ├── nginx/                        # Gateway config, TLS certs, htpasswd files
 ├── outputs/                      # Splits, labels, checkpoints, artifacts, submissions
 ├── scripts/                      # CLI pipeline entrypoints (preprocess/train/evaluate/predict)
+├── tests/
+│   └── smoke/                    # Compose smoke/acceptance checks (not unit tests)
 ├── services/
 │   ├── embedding-api/            # Async embedding jobs + sequence->GO orchestration endpoint
 │   ├── go-prediction-api/        # Embedding->GO inference API
