@@ -7,19 +7,42 @@ Minimal FastAPI service to generate protein language model embeddings and persis
 - Accepts protein inputs as either:
   - JSON `sequence_list` (list of `{id, sequence}`), or
   - FASTA upload
-- Runs embedding asynchronously via a background worker thread
-- Writes outputs to disk as `.npy` under:
-  - `outputs/service_artifacts/{job_id}/`
-- Uses in-process model caching (models are loaded once and reused while the service runs)
+- Writes a durable job row to Postgres (`proseqgo_jobs.embedding_jobs`, status=`queued`)
+- Enqueues the job id on Redis/RQ (`embedding-jobs`)
+- A separate `embedding-worker` container runs `process_job`, updates Postgres progress/status, and writes `.npy` artifacts under:
+  - `/app/outputs/service_artifacts/{job_id}/` (Compose bind-mount: `./outputs`)
+- Uses in-process model caching inside the **worker** (models load once per worker process)
 
 Current scope (Milestone 2, v1):
 
 - `stage` is effectively `test` only (embeds provided input; no labels)
 
+## Job queue architecture
+
+```text
+Client
+  -> embedding-api (FastAPI)
+       -> Postgres proseqgo_jobs (durable history)
+       -> Redis/RQ enqueue(process_job, job_id)
+  -> embedding-worker (RQ)
+       -> mark running / progress / succeeded|failed in Postgres
+       -> write .npy + artifact metadata rows
+```
+
+Redis holds only transient dispatch state. Postgres is the source of truth for `GET /api/v1/jobs/{id}`.
+
+### Crash recovery
+
+On worker startup, orphaned RQ "started" jobs are requeued and any matching Postgres `running` row is reset to `queued`. Acceptance test:
+
+```bash
+./scripts/test_embedding_worker_crash_recovery.sh
+```
+
 ## Requirements
 
 - Python 3.10+
-- Dependencies: `fastapi`, `uvicorn`, `python-multipart`, `torch`, `transformers`, `numpy`
+- Dependencies: `fastapi`, `uvicorn`, `python-multipart`, `torch`, `transformers`, `numpy`, `rq`, `redis`, `psycopg`
 
 ## Run with Docker (Compose)
 
@@ -33,12 +56,22 @@ chmod +x scripts/smoke_embedding_api.sh && ./scripts/smoke_embedding_api.sh
 
 See also [../../README.md](../../README.md) → **How to run with Docker** for volumes, output shapes, and manual `curl` examples.
 
+If Postgres was created before this migration, create the jobs DB once:
+
+```bash
+docker compose exec postgres psql -U "$POSTGRES_USER" -c 'CREATE DATABASE proseqgo_jobs;'
+```
+
 ## Run the service (local)
 
 From repo root (`CAFA-5-MLOps-solution/`):
 
 ```bash
+# terminal 1 — API
 uvicorn main:app --app-dir services/embedding-api --reload
+
+# terminal 2 — RQ worker (requires Redis + Postgres)
+cd services/embedding-api && python rq_worker_entry.py
 ```
 
 Health check:
@@ -206,8 +239,7 @@ Response (`200 OK`, simplified):
 
 ## Storage layout
 
-- Job DB:
-  - `outputs/service_artifacts/jobs.db`
+- Job history: Postgres DB `proseqgo_jobs` (tables `embedding_jobs`, `embedding_artifacts`)
 - Artifacts:
   - `outputs/service_artifacts/{job_id}/test_ids.npy`
   - `outputs/service_artifacts/{job_id}/test_embeddings.npy`
