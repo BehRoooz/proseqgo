@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
+
+import psycopg
+from psycopg.rows import dict_row
 
 
 def utc_now() -> str:
@@ -13,74 +13,104 @@ def utc_now() -> str:
 
 
 class JobStore:
-    def __init__(self, db_path: str | Path):
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self.conn.row_factory = sqlite3.Row
-        self.lock = threading.Lock()
+    """Postgres-backed durable job history for the training API."""
+
+    def __init__(self, database_url: str):
+        self.database_url = database_url
         self._init_db()
 
+    def _connect(self) -> psycopg.Connection:
+        return psycopg.connect(self.database_url, row_factory=dict_row)
+
     def _init_db(self) -> None:
-        with self.lock:
-            self.conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS jobs (
-                    job_id TEXT PRIMARY KEY,
-                    status TEXT NOT NULL,
-                    request_json TEXT NOT NULL,
-                    progress_json TEXT NOT NULL,
-                    error_json TEXT,
-                    result_json TEXT,
-                    created_at TEXT NOT NULL,
-                    started_at TEXT,
-                    finished_at TEXT
-                )
-                """
-            )
-            self.conn.commit()
+        for attempt in range(5):
+            try:
+                with self._connect() as conn:
+                    conn.execute(
+                        """
+                        CREATE TABLE IF NOT EXISTS training_jobs (
+                            job_id TEXT PRIMARY KEY,
+                            status TEXT NOT NULL,
+                            request_json TEXT NOT NULL,
+                            progress_json TEXT NOT NULL,
+                            error_json TEXT,
+                            result_json TEXT,
+                            created_at TEXT NOT NULL,
+                            started_at TEXT,
+                            finished_at TEXT
+                        )
+                        """
+                    )
+                    conn.execute(
+                        """
+                        CREATE INDEX IF NOT EXISTS idx_training_jobs_status_created
+                        ON training_jobs (status, created_at)
+                        """
+                    )
+                    conn.commit()
+                return
+            except psycopg.errors.UniqueViolation:
+                if attempt == 4:
+                    raise
+                continue
 
     def create_job(self, job_id: str, request_json: dict[str, Any]) -> None:
         progress = {"percent": 0.0, "message": "queued"}
-        with self.lock:
-            self.conn.execute(
+        with self._connect() as conn:
+            conn.execute(
                 """
-                INSERT INTO jobs (job_id, status, request_json, progress_json, error_json, result_json, created_at, started_at, finished_at)
-                VALUES (?, 'queued', ?, ?, NULL, NULL, ?, NULL, NULL)
+                INSERT INTO training_jobs (
+                    job_id, status, request_json, progress_json, error_json, result_json,
+                    created_at, started_at, finished_at
+                )
+                VALUES (%s, 'queued', %s, %s, NULL, NULL, %s, NULL, NULL)
                 """,
                 (job_id, json.dumps(request_json), json.dumps(progress), utc_now()),
             )
-            self.conn.commit()
+            conn.commit()
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
-        with self.lock:
-            row = self.conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM training_jobs WHERE job_id = %s",
+                (job_id,),
+            ).fetchone()
         if row is None:
             return None
         return self._row_to_job(row)
 
-    def get_next_queued_job_id(self) -> str | None:
-        with self.lock:
-            row = self.conn.execute(
-                "SELECT job_id FROM jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1"
-            ).fetchone()
-        return row["job_id"] if row else None
-
     def count_jobs_by_status(self, status: str) -> int:
-        with self.lock:
-            row = self.conn.execute(
-                "SELECT COUNT(1) AS n FROM jobs WHERE status = ?",
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(1) AS n FROM training_jobs WHERE status = %s",
                 (status,),
             ).fetchone()
         return int(row["n"]) if row else 0
 
     def mark_running(self, job_id: str) -> None:
-        with self.lock:
-            self.conn.execute(
-                "UPDATE jobs SET status = 'running', started_at = ? WHERE job_id = ?",
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE training_jobs
+                SET status = 'running', started_at = %s, finished_at = NULL, error_json = NULL
+                WHERE job_id = %s
+                """,
                 (utc_now(), job_id),
             )
-            self.conn.commit()
+            conn.commit()
+
+    def reset_to_queued(self, job_id: str) -> None:
+        """Return an orphaned running job to queued after worker crash recovery."""
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE training_jobs
+                SET status = 'queued', started_at = NULL, finished_at = NULL
+                WHERE job_id = %s AND status = 'running'
+                """,
+                (job_id,),
+            )
+            conn.commit()
 
     def update_progress(self, job_id: str, *, percent: float | None, message: str) -> None:
         progress: dict[str, Any] = {"message": message}
@@ -88,33 +118,39 @@ class JobStore:
             progress["percent"] = round(float(percent), 2)
         else:
             progress["percent"] = None
-        with self.lock:
-            self.conn.execute(
-                "UPDATE jobs SET progress_json = ? WHERE job_id = ?",
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE training_jobs SET progress_json = %s WHERE job_id = %s",
                 (json.dumps(progress), job_id),
             )
-            self.conn.commit()
+            conn.commit()
 
     def mark_succeeded(self, job_id: str, result: dict[str, Any]) -> None:
-        with self.lock:
-            self.conn.execute(
+        with self._connect() as conn:
+            conn.execute(
                 """
-                UPDATE jobs SET status = 'succeeded', finished_at = ?, error_json = NULL, result_json = ?
-                WHERE job_id = ?
+                UPDATE training_jobs
+                SET status = 'succeeded', finished_at = %s, error_json = NULL, result_json = %s
+                WHERE job_id = %s
                 """,
                 (utc_now(), json.dumps(result), job_id),
             )
-            self.conn.commit()
+            conn.commit()
 
     def mark_failed(self, job_id: str, error_json: dict[str, Any]) -> None:
-        with self.lock:
-            self.conn.execute(
-                "UPDATE jobs SET status = 'failed', error_json = ?, finished_at = ? WHERE job_id = ?",
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE training_jobs
+                SET status = 'failed', error_json = %s, finished_at = %s
+                WHERE job_id = %s
+                """,
                 (json.dumps(error_json), utc_now(), job_id),
             )
-            self.conn.commit()
+            conn.commit()
 
-    def _row_to_job(self, row: sqlite3.Row) -> dict[str, Any]:
+    @staticmethod
+    def _row_to_job(row: dict[str, Any]) -> dict[str, Any]:
         return {
             "job_id": row["job_id"],
             "status": row["status"],
