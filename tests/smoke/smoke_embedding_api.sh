@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # Smoke test for the Embedding API (direct uvicorn or via nginx gateway on port 80).
-# Usage:
-#   ./scripts/smoke_embedding_api.sh
-#   BASE_URL=http://127.0.0.1:8000 ./scripts/smoke_embedding_api.sh   # direct service port
+# Usage (from repo root):
+#   ./tests/smoke/smoke_embedding_api.sh
+#   BASE_URL=http://127.0.0.1:8000 ./tests/smoke/smoke_embedding_api.sh
 #   CURL_INSECURE=1 API_USER=user API_PASS=secret \
-#     BASE_URL=https://localhost ./scripts/smoke_embedding_api.sh     # docker compose (nginx)
+#     BASE_URL=https://localhost ./tests/smoke/smoke_embedding_api.sh
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 BASE_URL="${BASE_URL:-http://127.0.0.1}"
 FASTA_EXAMPLE="${REPO_ROOT}/examples/small_sequences.fasta"
 MAX_FASTA_UPLOAD_BYTES=$((5 * 1024 * 1024))

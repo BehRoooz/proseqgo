@@ -57,6 +57,8 @@ CAFA-5-MLOps-solution/
 ├── nginx/                        # Gateway config, TLS certs, htpasswd files
 ├── outputs/                      # Splits, labels, checkpoints, artifacts, submissions
 ├── scripts/                      # CLI pipeline entrypoints (preprocess/train/evaluate/predict)
+├── tests/
+│   └── smoke/                    # Compose smoke/acceptance checks (not unit tests)
 ├── services/
 │   ├── embedding-api/            # Async embedding jobs + sequence->GO orchestration endpoint
 │   ├── go-prediction-api/        # Embedding->GO inference API
@@ -141,6 +143,8 @@ make training-up
 MLflow runs as an internal service and is exposed through gateway path `/mlflow/`.
 
 - **Backend store:** PostgreSQL (`postgres` service, named volume `postgres_data`)
+- **Job history DB:** separate database `proseqgo_jobs` on the same Postgres (embedding + training durable jobs). Init script: `docker/postgres/init-proseqgo-jobs.sh` (first volume only). Existing volumes: `docker compose exec postgres psql -U "$POSTGRES_USER" -c 'CREATE DATABASE proseqgo_jobs;'`
+- **Transient job dispatch:** Redis/RQ (`redis`, AOF volume `redis_data`); workers `embedding-worker` / `trainer-worker`
 - **Artifact store:** MinIO S3-compatible bucket `mlflow-artifacts` (named volume `minio_data`)
 - **Tracking URI for clients:** `http://mlflow:5000` (clients need S3 env vars for direct artifact I/O to MinIO)
 - **Secrets:** copy [`.env.example`](.env.example) to `.env` and set Postgres/MinIO credentials before first run
@@ -159,13 +163,15 @@ Monitoring is profile-based and isolated from public ingress:
 - Prometheus scrapes:
   - `prometheus:9090`
   - `embedding-api:8000/metrics`
+  - `embedding-worker:8001/metrics`
   - `go-prediction-api:8000/metrics`
-  - `trainer-api:8000/metrics` (when training profile is active)
+  - `trainer-api:8000/metrics` / `trainer-worker:8001/metrics` (when training profile is active)
+  - `redis-exporter:9121`
 - Grafana datasource is provisioned from `monitoring/grafana/provisioning/datasources/prometheus.yml`.
 - Dashboards are file-provisioned from `monitoring/grafana/dashboards`.
 - Metrics family includes:
   - HTTP request/latency/in-flight metrics (`cafa5_http_*`)
-  - embedding queue and sequence-length telemetry
+  - embedding/training Postgres queue depth and RQ queue length
   - inference latency, validation failures, top_k distribution
 
 ## Alert Rules
@@ -181,6 +187,12 @@ Defined in `monitoring/alerts.yml`:
 - `Cafa5EmbeddingQueueBacklogHigh`
   - condition: queued embedding jobs >20 for 10m
   - severity: `warning`
+- `Cafa5EmbeddingWorkerDownWithBacklog`
+  - condition: embedding worker down while RQ queue non-empty for 5m
+  - severity: `critical`
+- `Cafa5RedisDown`
+  - condition: `redis_up == 0` for 2m
+  - severity: `critical`
 
 Verify:
 

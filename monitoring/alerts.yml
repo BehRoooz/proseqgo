@@ -3,7 +3,7 @@ groups:
     interval: 30s
     rules:
       - alert: Cafa5ServiceMetricsTargetDown
-        expr: up{job=~"prometheus|embedding_api_metrics|go_prediction_api_metrics|trainer_api_metrics"} == 0
+        expr: up{job=~"prometheus|embedding_api_metrics|embedding_worker_metrics|go_prediction_api_metrics|trainer_api_metrics|redis_exporter"} == 0
         for: 2m
         labels:
           severity: critical
@@ -35,3 +35,24 @@ groups:
         annotations:
           summary: "Embedding queue backlog high"
           description: "Queued embedding jobs >20 for 10m"
+
+      - alert: Cafa5EmbeddingWorkerDownWithBacklog
+        expr: |
+          up{job="embedding_worker_metrics"} == 0
+          and
+          cafa5_rq_queue_length{queue="embedding-jobs"} > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Embedding RQ worker down while queue has jobs"
+          description: "embedding-worker scrape is down and Redis queue embedding-jobs is non-empty"
+
+      - alert: Cafa5RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is down"
+          description: "redis_exporter reports redis_up == 0"

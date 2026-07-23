@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import threading
 import time
 import uuid
 
@@ -8,17 +7,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest, CollectorRegistry
 
-from config import API_PREFIX, ARTIFACT_ROOT, DB_PATH
+from config import API_PREFIX, ARTIFACT_ROOT, JOBS_DATABASE_URL
 from job_store import JobStore
+from queueing import enqueue_training_job, get_queue
 from schemas import CreateTrainJobResponse, JobStatusResponse, MlflowLinks, TrainJobRequest, TrainingProgress
 from src.utils import get_device_info
-from worker import worker_loop
+from worker import sync_queue_gauges
 
 app = FastAPI(title="Training API", version="0.1.0")
 
-
-# Prometheus metrics for the training API
-registry = CollectorRegistry() # to store metrics
+registry = CollectorRegistry()
 
 SERVICE_NAME = "trainer-api"
 
@@ -40,10 +38,20 @@ HTTP_IN_FLIGHT_REQUESTS = Gauge(
     labelnames=("service",),
     registry=registry,
 )
+TRAINING_QUEUE_JOBS = Gauge(
+    "cafa5_training_queue_jobs",
+    "Training jobs currently in each lifecycle state.",
+    labelnames=("status",),
+    registry=registry,
+)
+RQ_QUEUE_LENGTH = Gauge(
+    "cafa5_rq_queue_length",
+    "Redis/RQ queue length for training jobs.",
+    labelnames=("queue",),
+    registry=registry,
+)
 
-store = JobStore(DB_PATH)
-stop_event = threading.Event()
-worker_thread: threading.Thread | None = None
+store = JobStore(JOBS_DATABASE_URL)
 
 
 def _route_label(path: str) -> str:
@@ -52,6 +60,16 @@ def _route_label(path: str) -> str:
     if path.startswith(API_PREFIX):
         return path[len(API_PREFIX) :] or "/"
     return path
+
+
+def _refresh_job_metrics() -> None:
+    for status in ("queued", "running", "succeeded", "failed"):
+        TRAINING_QUEUE_JOBS.labels(status=status).set(store.count_jobs_by_status(status))
+    try:
+        queue = get_queue()
+        RQ_QUEUE_LENGTH.labels(queue=queue.name).set(float(queue.count))
+    except Exception:
+        pass
 
 
 @app.middleware("http")
@@ -82,17 +100,10 @@ async def prometheus_http_middleware(request, call_next):
 
 @app.on_event("startup")
 def startup_event() -> None:
-    global worker_thread
     ARTIFACT_ROOT.mkdir(parents=True, exist_ok=True)
-    worker_thread = threading.Thread(target=worker_loop, args=(store, stop_event), daemon=True)
-    worker_thread.start()
-
-
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    stop_event.set()
-    if worker_thread is not None:
-        worker_thread.join(timeout=2)
+    JobStore(JOBS_DATABASE_URL)
+    _refresh_job_metrics()
+    sync_queue_gauges(store)
 
 
 @app.get(API_PREFIX + "/health")
@@ -102,6 +113,7 @@ def health() -> dict[str, str | bool]:
 
 @app.get("/metrics", include_in_schema=False)
 def metrics() -> Response:
+    _refresh_job_metrics()
     return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -109,6 +121,8 @@ def metrics() -> Response:
 def create_train_job(request: TrainJobRequest) -> CreateTrainJobResponse:
     job_id = str(uuid.uuid4())
     store.create_job(job_id, request.model_dump())
+    enqueue_training_job(job_id)
+    _refresh_job_metrics()
     return CreateTrainJobResponse(
         job_id=job_id,
         status="queued",

@@ -1,14 +1,14 @@
 # Training API
 
-HTTP service that queues **model training** and **retraining** jobs and runs them in a background worker. Each job executes the same CLI entrypoints used for local development (`scripts/train.py` or `scripts/retrain_pipeline.py`), logs to **MLflow**, and can register the PyTorch model in the **Model Registry**.
+HTTP service that queues **model training** and **retraining** jobs via Redis/RQ and persists durable status in Postgres. Each job executes the same CLI entrypoints used for local development (`scripts/train.py` or `scripts/retrain_pipeline.py`), logs to **MLflow**, and can register the PyTorch model in the **Model Registry**.
 
 In the default Docker Compose stack, the Training API is **not** exposed on a host port directly. Traffic goes through the **NGINX gateway** on port **80** with HTTP Basic Auth.
 
 ## What this service does
 
 - Accepts async training job requests (`POST /api/train/train`).
-- Persists job state in a SQLite database (`outputs/training_api/jobs.db`).
-- Runs one job at a time in a background worker thread.
+- Persists job state in Postgres database `proseqgo_jobs` (table `training_jobs`).
+- Enqueues work on Redis/RQ (`training-jobs`); `trainer-worker` runs jobs.
 - Invokes the same training scripts as the CLI — no separate training logic in the API layer.
 - Returns MLflow run IDs, registry version, and browser-friendly MLflow UI links when a job succeeds.
 
@@ -23,9 +23,12 @@ Client (curl / automation)
         v
   trainer-api :8000          (FastAPI — POST /api/train/train)
         |
-        +--> JobStore (SQLite)     queued / running / succeeded / failed
+        +--> JobStore (Postgres proseqgo_jobs)   queued / running / succeeded / failed
         |
-        +--> Worker thread         picks next queued job (FIFO)
+        +--> Redis/RQ enqueue(process_job, job_id)
+                 |
+                 v
+           trainer-worker (RQ)
                  |
                  +-- mode=train    --> scripts/train.py
                  |
@@ -47,11 +50,17 @@ Client (curl / automation)
 | Component | Role |
 |-----------|------|
 | `main.py` | FastAPI app: health, submit job, poll status, Prometheus `/metrics` |
-| `worker.py` | Background loop; spawns training subprocess; parses summary JSON |
-| `job_store.py` | SQLite persistence for job lifecycle and results |
-| `config.py` | `API_PREFIX`, artifact paths, MLflow defaults |
+| `worker.py` | RQ `process_job`; spawns training subprocess; parses summary JSON |
+| `rq_worker_entry.py` | RQ worker process + orphan requeue + metrics on `:8001` |
+| `job_store.py` | Postgres persistence for job lifecycle and results |
+| `queueing.py` | Redis/RQ enqueue with timeout + Retry |
+| `config.py` | `API_PREFIX`, artifact paths, MLflow/Redis/Postgres defaults |
 
-Jobs are processed **sequentially** (one running job at a time). Additional submissions are queued in arrival order.
+Default: one RQ worker processes jobs from `training-jobs` (typically one at a time). Scale by adding workers carefully (GPU contention).
+
+### Crash recovery
+
+Worker startup requeues orphaned RQ started jobs and resets matching Postgres `running` rows to `queued`. See also `tests/smoke/test_embedding_worker_crash_recovery.sh` for the embedding analogue.
 
 ## Training vs retraining
 
@@ -432,7 +441,10 @@ Set in `docker-compose.yml` for the `trainer-api` service (or export for local r
 | `MLFLOW_EXTERNAL_UI_BASE` | `http://127.0.0.1:5000` | Browser-reachable MLflow UI base for links in job JSON (Compose: `http://127.0.0.1/mlflow`) |
 | `REGISTERED_MODEL_NAME` | `cafa-go-model` | Model Registry name passed to training scripts |
 | `PROMOTION_THRESHOLD` | `0.35` | Holdout F1 threshold for `champion` promotion (retrain mode) |
-| `TRAINING_API_ARTIFACT_ROOT` | `outputs/training_api` | Directory for SQLite job DB |
+| `TRAINING_API_ARTIFACT_ROOT` | `/app/outputs/training_api` | Local artifact directory (not the job DB) |
+| `JOBS_DATABASE_URL` | Postgres `proseqgo_jobs` | Durable job history |
+| `REDIS_URL` | `redis://redis:6379/0` | RQ broker |
+| `TRAINING_JOB_TIMEOUT_SEC` | `86400` | RQ job timeout |
 | `CAFA_DEVICE` | `auto` | Device selection (`auto`, `cuda`, `cpu`) |
 | `PYTHON_EXECUTABLE` | `python` | Python binary for subprocess invocation |
 
@@ -447,14 +459,15 @@ Key on-disk artifacts (repo `outputs/` volume):
 | `outputs/train_run_summary.json` | `train.py` | `train_run_id`, registry version, `model_uri` |
 | `outputs/holdout_eval_summary.json` | `evaluate_holdout.py` | `eval_run_id`, holdout metrics (retrain only) |
 | `outputs/checkpoints/best_model.pt` | `train.py` | Best validation checkpoint |
-| `outputs/training_api/jobs.db` | Training API | Job queue and status |
+| Postgres `proseqgo_jobs.training_jobs` | Training API / worker | Durable job queue and status |
 
 ## Monitoring
 
 Prometheus metrics (scraped when the `monitoring` profile is active):
 
-- `cafa5_training_jobs_total` — terminal jobs by status and mode
-- `cafa5_training_queue_jobs` — jobs per lifecycle state
+- `cafa5_training_jobs_total` — terminal jobs by status and mode (worker `:8001`)
+- `cafa5_training_queue_jobs` — jobs per lifecycle state (Postgres-backed)
+- `cafa5_rq_queue_length` — Redis/RQ pending length
 - `cafa5_training_job_duration_seconds` — job duration histogram
 - `cafa5_training_subprocess_failures_total` — failure reasons
 

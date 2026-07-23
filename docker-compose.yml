@@ -1,6 +1,7 @@
 # Integrated stack: Embedding API + GO Prediction API + MLflow + Training API.
 # Single public entry: nginx on port 80. Run from repo root: docker compose up --build
 # Training API: docker compose --profile training up --build
+# Monitoring: docker compose --profile monitoring up
 # Copy .env.example to .env and set secrets before first run.
 networks:
   cafa5:
@@ -11,6 +12,7 @@ volumes:
   grafana_data:
   postgres_data:
   minio_data:
+  redis_data:
 
 services:
   postgres:
@@ -22,12 +24,27 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-proseqgo-jobs.sh:/docker-entrypoint-initdb.d/01-proseqgo-jobs.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    networks: [cafa5]
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
     restart: unless-stopped
 
   minio:
@@ -144,27 +161,60 @@ services:
     working_dir: /app
     profiles: ["training"]
     networks: [cafa5]
-    gpus: all
-    environment:
+    environment: &trainer-env
       PYTHONUNBUFFERED: "1"
-      PYTHONPATH: /app
+      PYTHONPATH: /app:/app/services/training-api
       CAFA_DEVICE: auto
-      NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
       AWS_DEFAULT_REGION: us-east-1
       MLFLOW_S3_IGNORE_TLS: "true"
-      # Browser URL for MLflow links from GET /api/train/jobs/{id} (via gateway, HTTPS)
       MLFLOW_EXTERNAL_UI_BASE: http://127.0.0.1/mlflow
       REGISTERED_MODEL_NAME: ${REGISTERED_MODEL_NAME}
       PROMOTION_THRESHOLD: ${PROMOTION_THRESHOLD}
+      JOBS_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/proseqgo_jobs
+      REDIS_URL: redis://redis:6379/0
+      TRAINING_JOB_TIMEOUT_SEC: ${TRAINING_JOB_TIMEOUT_SEC:-86400}
+      TRAINING_API_ARTIFACT_ROOT: /app/outputs/training_api
     depends_on:
-      - mlflow
+      mlflow:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./data:/app/data
       - ./outputs:/app/outputs
+
+  trainer-worker:
+    build:
+      context: .
+      dockerfile: docker/docker_training/Dockerfile.training
+    image: cafa5-trainer-api:local
+    working_dir: /app/services/training-api
+    profiles: ["training"]
+    networks: [cafa5]
+    gpus: all
+    stop_grace_period: 2h
+    environment:
+      <<: *trainer-env
+      NVIDIA_VISIBLE_DEVICES: all
+      WORKER_METRICS_PORT: "8001"
+    depends_on:
+      trainer-api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+      - ./outputs:/app/outputs
+    command: ["python", "rq_worker_entry.py"]
+    restart: unless-stopped
 
   embedding-api:
     build:
@@ -173,12 +223,10 @@ services:
     image: cafa5-embedding-api:local
     working_dir: /app/services/embedding-api
     networks: [cafa5]
-    gpus: all
-    environment:
+    environment: &embedding-env
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/embedding-api
       CAFA_DEVICE: auto
-      NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
@@ -186,12 +234,50 @@ services:
       AWS_DEFAULT_REGION: us-east-1
       MLFLOW_S3_IGNORE_TLS: "true"
       GO_PREDICTION_API_URL: http://go-prediction-api:8000
+      JOBS_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/proseqgo_jobs
+      REDIS_URL: redis://redis:6379/0
+      EMBEDDING_JOB_TIMEOUT_SEC: ${EMBEDDING_JOB_TIMEOUT_SEC:-3600}
+      EMBEDDING_ARTIFACT_ROOT: /app/outputs/service_artifacts
     depends_on:
-      - go-prediction-api
-      - mlflow
+      go-prediction-api:
+        condition: service_started
+      mlflow:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
       - ./outputs:/app/outputs
       - ./data/hf_cache:/app/data/hf_cache
+
+  embedding-worker:
+    build:
+      context: .
+      dockerfile: docker/docker_embedding/Dockerfile.embedding-api
+    image: cafa5-embedding-api:local
+    working_dir: /app/services/embedding-api
+    networks: [cafa5]
+    gpus: all
+    stop_grace_period: 3700s
+    environment:
+      <<: *embedding-env
+      NVIDIA_VISIBLE_DEVICES: all
+      WORKER_METRICS_PORT: "8001"
+      # Gives crash-recovery tests a reliable kill window after mark_running.
+      EMBEDDING_JOB_START_DELAY_SEC: ${EMBEDDING_JOB_START_DELAY_SEC:-0}
+    depends_on:
+      embedding-api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./outputs:/app/outputs
+      - ./data/hf_cache:/app/data/hf_cache
+    command: ["python", "rq_worker_entry.py"]
+    restart: unless-stopped
 
   go-prediction-api:
     build:
@@ -239,17 +325,27 @@ services:
     networks: [cafa5]
     ports:
       - "80:80"
-    #  - "443:443" # HTTPS is not supported yet
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/.htpasswd-admin:/etc/nginx/.htpasswd-admin:ro
       - ./nginx/.htpasswd-user:/etc/nginx/.htpasswd-user:ro
-      #- ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - embedding-api
+      - embedding-worker
       - go-prediction-api
       - mlflow
       - streamlit-ui
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    profiles: ["monitoring"]
+    networks: [cafa5]
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:latest
@@ -267,6 +363,10 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
+    depends_on:
+      - embedding-api
+      - embedding-worker
+      - redis-exporter
 
   grafana:
     image: grafana/grafana:latest
