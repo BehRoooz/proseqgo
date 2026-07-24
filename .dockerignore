@@ -1,0 +1,27 @@
+# Keep Compose/CI build context small. Data and secrets are mounted at runtime.
+.git
+.gitignore
+.github
+.venv
+venv
+__pycache__/
+*.pyc
+*.pyo
+*.npy
+*.pt
+*.pth
+*.safetensors
+data/
+outputs/
+backups/
+archives/
+notes/
+notebooks/
+docs/
+tests/
+.cursor/
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example

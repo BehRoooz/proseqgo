@@ -5,6 +5,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     PYTHONPATH=/app:/app/services/go-prediction-api
 
+# Override in CI with CPU wheels: --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu132
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt /app/
 RUN pip install --upgrade pip "setuptools<82" wheel && \
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132 && \
+    pip install torch torchvision --index-url ${TORCH_INDEX_URL} && \
     pip install -r /app/requirements.txt
 
 COPY src /app/src

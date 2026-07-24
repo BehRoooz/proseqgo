@@ -4,6 +4,9 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     HF_HOME=/app/data/hf_cache
 
+# Override in CI with CPU wheels: --build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cu132
+
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && \
-    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu132 && \
+    pip install torch torchvision --index-url ${TORCH_INDEX_URL} && \
     pip install -r /app/requirements.txt
 
 # Copy core project code used by the worker / embedder.
