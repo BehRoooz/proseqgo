@@ -4,7 +4,7 @@
 # Monitoring: docker compose --profile monitoring up
 # Copy .env.example to .env and set secrets before first run.
 networks:
-  cafa5:
+  proseqgo:
     driver: bridge
 
 volumes:
@@ -17,7 +17,7 @@ volumes:
 services:
   postgres:
     image: postgres:16-alpine
-    networks: [cafa5]
+    networks: [proseqgo]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -35,7 +35,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    networks: [cafa5]
+    networks: [proseqgo]
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
@@ -49,7 +49,7 @@ services:
 
   minio:
     image: minio/minio:latest
-    networks: [cafa5]
+    networks: [proseqgo]
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
@@ -69,7 +69,7 @@ services:
 
   minio-init:
     image: minio/mc:latest
-    networks: [cafa5]
+    networks: [proseqgo]
     depends_on:
       minio:
         condition: service_healthy
@@ -89,8 +89,8 @@ services:
     build:
       context: .
       dockerfile: docker/docker_mlflow/Dockerfile
-    image: cafa5-mlflow:local
-    networks: [cafa5]
+    image: proseqgo-mlflow:local
+    networks: [proseqgo]
     depends_on:
       postgres:
         condition: service_healthy
@@ -113,7 +113,7 @@ services:
 
   postgres-backup:
     image: prodrigestivill/postgres-backup-local:16
-    networks: [cafa5]
+    networks: [proseqgo]
     depends_on:
       postgres:
         condition: service_healthy
@@ -133,7 +133,7 @@ services:
 
   backup-offload:
     image: minio/mc:latest
-    networks: [cafa5]
+    networks: [proseqgo]
     depends_on:
       minio:
         condition: service_healthy
@@ -157,10 +157,10 @@ services:
     build:
       context: .
       dockerfile: docker/docker_training/Dockerfile.training
-    image: cafa5-trainer-api:local
+    image: proseqgo-trainer-api:local
     working_dir: /app
     profiles: ["training"]
-    networks: [cafa5]
+    networks: [proseqgo]
     environment: &trainer-env
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/training-api
@@ -193,10 +193,10 @@ services:
     build:
       context: .
       dockerfile: docker/docker_training/Dockerfile.training
-    image: cafa5-trainer-api:local
+    image: proseqgo-trainer-api:local
     working_dir: /app/services/training-api
     profiles: ["training"]
-    networks: [cafa5]
+    networks: [proseqgo]
     gpus: all
     stop_grace_period: 2h
     environment:
@@ -220,9 +220,9 @@ services:
     build:
       context: .
       dockerfile: docker/docker_embedding/Dockerfile.embedding-api
-    image: cafa5-embedding-api:local
+    image: proseqgo-embedding-api:local
     working_dir: /app/services/embedding-api
-    networks: [cafa5]
+    networks: [proseqgo]
     environment: &embedding-env
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/embedding-api
@@ -255,9 +255,9 @@ services:
     build:
       context: .
       dockerfile: docker/docker_embedding/Dockerfile.embedding-api
-    image: cafa5-embedding-api:local
+    image: proseqgo-embedding-api:local
     working_dir: /app/services/embedding-api
-    networks: [cafa5]
+    networks: [proseqgo]
     gpus: all
     stop_grace_period: 3700s
     environment:
@@ -283,9 +283,9 @@ services:
     build:
       context: .
       dockerfile: docker/docker_go_term/Dockerfile.api
-    image: cafa5-go-prediction-api:local
+    image: proseqgo-go-prediction-api:local
     working_dir: /app/services/go-prediction-api
-    networks: [cafa5]
+    networks: [proseqgo]
     gpus: all
     environment:
       PYTHONUNBUFFERED: "1"
@@ -310,9 +310,9 @@ services:
     build:
       context: .
       dockerfile: docker/docker_streamlit/Dockerfile.streamlit
-    image: cafa5-streamlit-ui:local
+    image: proseqgo-streamlit-ui:local
     working_dir: /app/services/streamlit-ui
-    networks: [cafa5]
+    networks: [proseqgo]
     environment:
       GATEWAY_BASE_URL: http://nginx
     depends_on:
@@ -322,7 +322,7 @@ services:
 
   nginx:
     image: nginx:latest
-    networks: [cafa5]
+    networks: [proseqgo]
     ports:
       - "80:80"
     volumes:
@@ -339,7 +339,7 @@ services:
   redis-exporter:
     image: oliver006/redis_exporter:v1.66.0
     profiles: ["monitoring"]
-    networks: [cafa5]
+    networks: [proseqgo]
     environment:
       REDIS_ADDR: redis://redis:6379
     depends_on:
@@ -351,7 +351,7 @@ services:
     image: prom/prometheus:latest
     container_name: prometheus
     profiles: ["monitoring"]
-    networks: [cafa5]
+    networks: [proseqgo]
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
@@ -372,7 +372,7 @@ services:
     image: grafana/grafana:latest
     container_name: grafana
     profiles: ["monitoring"]
-    networks: [cafa5]
+    networks: [proseqgo]
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
