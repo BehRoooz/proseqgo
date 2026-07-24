@@ -1,4 +1,4 @@
-# Prometheus configuration for CAFA-5 MLOps solution
+# Prometheus configuration for ProSeqGO
 global:
   scrape_interval: 30s
   evaluation_interval: 30s
