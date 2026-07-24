@@ -1,5 +1,5 @@
 .PHONY: help up down restart training-up training-down monitoring-up monitoring-down \
-	up-all down-all lint test build-images smoke ci-env
+	up-all down-all lint test build-images pull-images smoke ci-env
 
 # Product Python paths linted in CI (Phase 1A). Expand later if needed.
 LINT_PATHS := src services scripts
@@ -14,6 +14,16 @@ MLFLOW_IMAGE ?= proseqgo-mlflow:local
 # Local default matches GPU Compose; CI passes cpu index via TORCH_INDEX_URL.
 TORCH_INDEX_URL ?= https://download.pytorch.org/whl/cu132
 
+# GHCR (Phase 2). Owner must be lowercase. Tag: main | sha-<fullsha>
+GHCR_OWNER ?= behroooz
+GHCR_REGISTRY ?= ghcr.io
+GHCR_TAG ?= main
+GHCR_EMBEDDING_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-embedding-api:$(GHCR_TAG)
+GHCR_GO_PRED_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-go-prediction-api:$(GHCR_TAG)
+GHCR_STREAMLIT_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-streamlit-ui:$(GHCR_TAG)
+GHCR_TRAINER_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-trainer-api:$(GHCR_TAG)
+GHCR_MLFLOW_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-mlflow:$(GHCR_TAG)
+
 help:
 	@echo "Available targets:"
 	@echo "  make up               - Start default services with Docker Compose"
@@ -25,6 +35,7 @@ help:
 	@echo "  make lint             - Ruff check on src/ services/ scripts/"
 	@echo "  make test             - Unit tests (tests/unit; Phase 1B)"
 	@echo "  make build-images     - Build all product Docker images"
+	@echo "  make pull-images      - Pull product images from GHCR (GHCR_TAG=main|sha-...)"
 	@echo "  make smoke            - Run Compose smoke scripts (stack must be up)"
 	@echo "  make ci-env           - Copy .env.example -> .env for local/CI Compose"
 
@@ -88,6 +99,13 @@ build-images:
 		-f docker/docker_training/Dockerfile.training \
 		-t $(TRAINER_IMAGE) .
 	docker build -f docker/docker_mlflow/Dockerfile -t $(MLFLOW_IMAGE) .
+
+pull-images:
+	docker pull $(GHCR_EMBEDDING_IMAGE)
+	docker pull $(GHCR_GO_PRED_IMAGE)
+	docker pull $(GHCR_STREAMLIT_IMAGE)
+	docker pull $(GHCR_TRAINER_IMAGE)
+	docker pull $(GHCR_MLFLOW_IMAGE)
 
 # Expects default Compose stack already healthy. Does not start training/GPU jobs.
 smoke:

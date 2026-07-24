@@ -466,18 +466,19 @@ make monitoring-down
 make lint            # Ruff on src/ services/ scripts/
 make test            # Unit tests (tests/unit)
 make build-images    # Build all five product images
+make pull-images     # Pull product images from GHCR (GHCR_TAG=main|sha-...)
 make smoke           # Smoke scripts (Compose stack must already be up)
 make ci-env          # Copy .env.example → .env if missing
 ```
 
 ## CI (GitHub Actions)
 
-PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds** (no registry push yet). See [`.github/CI.md`](.github/CI.md).
+PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds**. Merges to `main` also **publish to GHCR** (`sha-<fullsha>` + `main`). See [`.github/CI.md`](.github/CI.md).
 
-- Registry target for later phases: **GHCR**
+- Registry: **GHCR** (`ghcr.io/behroooz/proseqgo-*`)
 - CI does **not** run training/GPU/retrain jobs
 - Compose in CI will use `make ci-env` (`.env.example` only)—never commit real secrets
-- Local image rebuild: `make build-images`
+- Local image rebuild: `make build-images`; pull published: `make pull-images`
 
 ## Service-Specific Documentation
 

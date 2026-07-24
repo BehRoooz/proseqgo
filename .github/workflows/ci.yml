@@ -12,6 +12,11 @@ concurrency:
 permissions:
   contents: read
   actions: write
+  packages: write
+
+env:
+  # GHCR requires lowercase owner/image names.
+  REGISTRY: ghcr.io
 
 jobs:
   lint:
@@ -53,7 +58,7 @@ jobs:
       - name: Run unit tests
         run: make test
 
-  # Phase 1C: prove all product images build. No registry push (Phase 2).
+  # Phase 1C/2: build all product images; push to GHCR only on main.
   build-images:
     name: Build ${{ matrix.name }}
     runs-on: ubuntu-latest
@@ -93,17 +98,54 @@ jobs:
             /usr/local/.ghcup || true
           df -h
 
+      - name: Set image name and push flag
+        id: meta
+        run: |
+          owner="$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')"
+          echo "image=${{ env.REGISTRY }}/${owner}/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+          if [ '${{ github.event_name }}' = 'push' ] && [ '${{ github.ref }}' = 'refs/heads/main' ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Log in to GHCR
+        if: steps.meta.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # PR / non-main: prove the image builds; do not push.
       - name: Build image (no push)
+        if: steps.meta.outputs.push != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: false
           outputs: type=cacheonly
-          tags: ${{ matrix.image }}:sha-${{ github.sha }}
+          tags: ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
           build-args: ${{ matrix.build_args }}
           cache-from: type=gha,scope=build-${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=build-${{ matrix.name }}
+
+      # main: publish immutable sha tag + moving main tag.
+      - name: Build and push image
+        if: steps.meta.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:sha-${{ github.sha }}
+            ${{ steps.meta.outputs.image }}:main
+          build-args: ${{ matrix.build_args }}
+          cache-from: type=gha,scope=build-${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=build-${{ matrix.name }}
+          provenance: false
