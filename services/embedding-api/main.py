@@ -40,44 +40,44 @@ registry = CollectorRegistry()
 SERVICE_NAME = "embedding-api"
 
 HTTP_REQUESTS_TOTAL = Counter(
-    "cafa5_http_requests_total",
+    "http_requests_total",
     "Total number of HTTP requests.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_REQUEST_DURATION_SECONDS = Histogram(
-    "cafa5_http_request_duration_seconds",
+    "http_request_duration_seconds",
     "HTTP request duration in seconds.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_IN_FLIGHT_REQUESTS = Gauge(
-    "cafa5_http_in_flight_requests",
+    "http_in_flight_requests",
     "Number of in-flight HTTP requests.",
     labelnames=("service",),
     registry=registry,
 )
 EMBEDDING_SEQUENCE_LENGTH = Histogram(
-    "cafa5_embedding_sequence_length",
+    "embedding_sequence_length",
     "Observed amino-acid sequence lengths partitioned by embedding backend.",
     labelnames=("backend",),
     buckets=(16, 32, 64, 128, 256, 512, 1024, 1280, 2048, 4096, 8192, float("inf")),
     registry=registry,
 )
 EMBEDDING_DIMENSION_MISMATCHES_TOTAL = Counter(
-    "cafa5_embedding_dimension_mismatch_total",
+    "embedding_dimension_mismatch_total",
     "Total number of embedding dimension mismatches detected before GO inference.",
     registry=registry,
 )
 # Durable Postgres-backed queue depth (also updated on the worker process registry).
 EMBEDDING_QUEUE_JOBS = Gauge(
-    "cafa5_embedding_queue_jobs",
+    "embedding_queue_jobs",
     "Embedding jobs currently in each lifecycle state.",
     labelnames=("status",),
     registry=registry,
 )
 RQ_QUEUE_LENGTH = Gauge(
-    "cafa5_rq_queue_length",
+    "rq_queue_length",
     "Redis/RQ queue length for embedding jobs.",
     labelnames=("queue",),
     registry=registry,
