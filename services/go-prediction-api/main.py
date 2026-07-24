@@ -24,7 +24,7 @@ MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "/tmp/mlflow-cache")
 TERM_NAMES_PATH = APP_ROOT / "outputs" / "label_matrix_top500" / "term_names.npy"
 META_PATH = APP_ROOT / "outputs" / "splits" / "model_meta.json"
 
-app = FastAPI(title="CAFA Inference API")
+app = FastAPI(title="ProSeqGO Inference API")
 
 # Prometheus metrics for the GO prediction API
 registry = CollectorRegistry() # to store metrics
@@ -34,43 +34,43 @@ SERVICE_NAME = "go-prediction-api"
 
 # metrics for HTTP requests
 HTTP_REQUESTS_TOTAL = Counter(
-    "cafa5_http_requests_total",
+    "http_requests_total",
     "Total number of HTTP requests.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_REQUEST_DURATION_SECONDS = Histogram(
-    "cafa5_http_request_duration_seconds",
+    "http_request_duration_seconds",
     "HTTP request duration in seconds.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_IN_FLIGHT_REQUESTS = Gauge(
-    "cafa5_http_in_flight_requests",
+    "http_in_flight_requests",
     "Number of in-flight HTTP requests.",
     labelnames=("service",),
     registry=registry,
 )
 INFERENCE_REQUESTS_TOTAL = Counter(
-    "cafa5_inference_requests_total",
+    "inference_requests_total",
     "Total inference requests partitioned by model version and status code.",
     labelnames=("model_version", "status_code"),
     registry=registry,
 )
 INFERENCE_DURATION_SECONDS = Histogram(
-    "cafa5_inference_duration_seconds",
+    "inference_duration_seconds",
     "Inference runtime in seconds partitioned by model version.",
     labelnames=("model_version",),
     registry=registry,
 )
 INFERENCE_INPUT_VALIDATION_FAILURES_TOTAL = Counter(
-    "cafa5_inference_input_validation_failures_total",
+    "inference_input_validation_failures_total",
     "Total inference input validation failures partitioned by reason.",
     labelnames=("reason",),
     registry=registry,
 )
 INFERENCE_TOP_K_REQUESTS_TOTAL = Counter(
-    "cafa5_inference_top_k_requests_total",
+    "inference_top_k_requests_total",
     "Distribution of requested top_k values.",
     labelnames=("top_k",),
     registry=registry,
