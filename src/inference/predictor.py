@@ -15,7 +15,6 @@ from src.config import Config
 from src.preprocess.dataset import ProteinSequenceDataset
 from src.models import build_model
 from src.utils import get_device
-from src.config import Config
 
 logger = logging.getLogger("cafa5")
 

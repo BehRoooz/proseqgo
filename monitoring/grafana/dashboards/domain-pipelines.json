@@ -40,7 +40,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 0, "y": 2 },
         "targets": [
           {
-            "expr": "sum by (status) (cafa5_embedding_queue_jobs)",
+            "expr": "sum by (status) (embedding_queue_jobs)",
             "legendFormat": "{{status}}",
             "refId": "A"
           }
@@ -61,7 +61,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 8, "y": 2 },
         "targets": [
           {
-            "expr": "sum by (status, backend) (increase(cafa5_embedding_jobs_total{backend=~\"$backend\"}[15m]))",
+            "expr": "sum by (status, backend) (increase(embedding_jobs_total{backend=~\"$backend\"}[15m]))",
             "legendFormat": "{{backend}} {{status}}",
             "refId": "A"
           }
@@ -82,7 +82,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 16, "y": 2 },
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum by (le, status, backend) (rate(cafa5_embedding_job_duration_seconds_bucket{backend=~\"$backend\"}[5m])))",
+            "expr": "histogram_quantile(0.95, sum by (le, status, backend) (rate(embedding_job_duration_seconds_bucket{backend=~\"$backend\"}[5m])))",
             "legendFormat": "{{backend}} {{status}} p95",
             "refId": "A"
           }
@@ -103,7 +103,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 10 },
         "targets": [
           {
-            "expr": "sum by (le, backend) (rate(cafa5_embedding_sequence_length_bucket{backend=~\"$backend\"}[5m]))",
+            "expr": "sum by (le, backend) (rate(embedding_sequence_length_bucket{backend=~\"$backend\"}[5m]))",
             "legendFormat": "{{backend}} <= {{le}}",
             "refId": "A"
           }
@@ -124,7 +124,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 10 },
         "targets": [
           {
-            "expr": "sum by (backend) (rate(cafa5_embedding_sequences_processed_total{backend=~\"$backend\"}[5m]))",
+            "expr": "sum by (backend) (rate(embedding_sequences_processed_total{backend=~\"$backend\"}[5m]))",
             "legendFormat": "{{backend}}",
             "refId": "A"
           }
@@ -145,7 +145,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
         "targets": [
           {
-            "expr": "cafa5_rq_queue_length",
+            "expr": "rq_queue_length",
             "legendFormat": "{{queue}}",
             "refId": "A"
           }
@@ -198,7 +198,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 0, "y": 28 },
         "targets": [
           {
-            "expr": "sum by (status) (cafa5_training_queue_jobs)",
+            "expr": "sum by (status) (training_queue_jobs)",
             "legendFormat": "{{status}}",
             "refId": "A"
           }
@@ -219,7 +219,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 8, "y": 28 },
         "targets": [
           {
-            "expr": "sum by (reason) (increase(cafa5_training_subprocess_failures_total{reason=~\"$reason\"}[15m]))",
+            "expr": "sum by (reason) (increase(training_subprocess_failures_total{reason=~\"$reason\"}[15m]))",
             "legendFormat": "{{reason}}",
             "refId": "A"
           }
@@ -240,7 +240,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 16, "y": 28 },
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum by (le, mode, status) (rate(cafa5_training_job_duration_seconds_bucket{mode=~\"$mode\"}[5m])))",
+            "expr": "histogram_quantile(0.95, sum by (le, mode, status) (rate(training_job_duration_seconds_bucket{mode=~\"$mode\"}[5m])))",
             "legendFormat": "{{mode}} {{status}} p95",
             "refId": "A"
           }
@@ -261,7 +261,7 @@
         "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
         "targets": [
           {
-            "expr": "sum by (mode, status) (increase(cafa5_training_jobs_total{mode=~\"$mode\"}[15m]))",
+            "expr": "sum by (mode, status) (increase(training_jobs_total{mode=~\"$mode\"}[15m]))",
             "legendFormat": "{{mode}} {{status}}",
             "refId": "A"
           }
@@ -293,7 +293,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 0, "y": 46 },
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum by (le, model_version) (rate(cafa5_inference_duration_seconds_bucket{model_version=~\"$model_version\"}[5m])))",
+            "expr": "histogram_quantile(0.95, sum by (le, model_version) (rate(inference_duration_seconds_bucket{model_version=~\"$model_version\"}[5m])))",
             "legendFormat": "{{model_version}} p95",
             "refId": "A"
           }
@@ -314,7 +314,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 8, "y": 46 },
         "targets": [
           {
-            "expr": "sum by (model_version, status_code) (rate(cafa5_inference_requests_total{model_version=~\"$model_version\"}[5m]))",
+            "expr": "sum by (model_version, status_code) (rate(inference_requests_total{model_version=~\"$model_version\"}[5m]))",
             "legendFormat": "{{model_version}} {{status_code}}",
             "refId": "A"
           }
@@ -335,7 +335,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 16, "y": 46 },
         "targets": [
           {
-            "expr": "sum by (reason) (increase(cafa5_inference_input_validation_failures_total{reason=~\"$reason\"}[15m]))",
+            "expr": "sum by (reason) (increase(inference_input_validation_failures_total{reason=~\"$reason\"}[15m]))",
             "legendFormat": "{{reason}}",
             "refId": "A"
           }
@@ -356,7 +356,7 @@
         "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
         "targets": [
           {
-            "expr": "sum by (top_k) (increase(cafa5_inference_top_k_requests_total{top_k=~\"$top_k\"}[1h]))",
+            "expr": "sum by (top_k) (increase(inference_top_k_requests_total{top_k=~\"$top_k\"}[1h]))",
             "legendFormat": "top_k={{top_k}}",
             "refId": "A"
           }
@@ -377,12 +377,12 @@
         "gridPos": { "h": 8, "w": 12, "x": 12, "y": 54 },
         "targets": [
           {
-            "expr": "sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\"}[5m])), 1e-9)",
+            "expr": "sum(rate(inference_requests_total{model_version=~\"$model_version\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(inference_requests_total{model_version=~\"$model_version\"}[5m])), 1e-9)",
             "legendFormat": "5xx ratio",
             "refId": "A"
           },
           {
-            "expr": "sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\",status_code=~\"4..\"}[5m])) / clamp_min(sum(rate(cafa5_inference_requests_total{model_version=~\"$model_version\"}[5m])), 1e-9)",
+            "expr": "sum(rate(inference_requests_total{model_version=~\"$model_version\",status_code=~\"4..\"}[5m])) / clamp_min(sum(rate(inference_requests_total{model_version=~\"$model_version\"}[5m])), 1e-9)",
             "legendFormat": "4xx ratio",
             "refId": "B"
           }
@@ -399,7 +399,7 @@
     "refresh": "30s",
     "schemaVersion": 39,
     "style": "dark",
-    "tags": ["cafa5", "domain", "mlops", "embedding", "training", "inference"],
+    "tags": ["cafa5", "domain", "mlops", "embedding", "training", "inference", "proseqgo"],
     "templating": {
       "list": [
         {
@@ -408,9 +408,9 @@
           "label": "Embedding Backend",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_embedding_jobs_total, backend)",
+          "definition": "label_values(embedding_jobs_total, backend)",
           "query": {
-            "query": "label_values(cafa5_embedding_jobs_total, backend)",
+            "query": "label_values(embedding_jobs_total, backend)",
             "refId": "BackendVar"
           },
           "multi": true,
@@ -424,9 +424,9 @@
           "label": "Training Mode",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_training_jobs_total, mode)",
+          "definition": "label_values(training_jobs_total, mode)",
           "query": {
-            "query": "label_values(cafa5_training_jobs_total, mode)",
+            "query": "label_values(training_jobs_total, mode)",
             "refId": "ModeVar"
           },
           "multi": true,
@@ -440,9 +440,9 @@
           "label": "Model Version",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_inference_requests_total, model_version)",
+          "definition": "label_values(inference_requests_total, model_version)",
           "query": {
-            "query": "label_values(cafa5_inference_requests_total, model_version)",
+            "query": "label_values(inference_requests_total, model_version)",
             "refId": "ModelVerVar"
           },
           "multi": true,
@@ -456,9 +456,9 @@
           "label": "Failure Reason",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_training_subprocess_failures_total, reason)",
+          "definition": "label_values(training_subprocess_failures_total, reason)",
           "query": {
-            "query": "label_values(cafa5_training_subprocess_failures_total, reason)",
+            "query": "label_values(training_subprocess_failures_total, reason)",
             "refId": "ReasonVar"
           },
           "multi": true,
@@ -472,9 +472,9 @@
           "label": "Top-K",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_inference_top_k_requests_total, top_k)",
+          "definition": "label_values(inference_top_k_requests_total, top_k)",
           "query": {
-            "query": "label_values(cafa5_inference_top_k_requests_total, top_k)",
+            "query": "label_values(inference_top_k_requests_total, top_k)",
             "refId": "TopKVar"
           },
           "multi": true,
@@ -487,8 +487,8 @@
     "time": { "from": "now-6h", "to": "now" },
     "timepicker": {},
     "timezone": "",
-    "title": "CAFA5 Domain Pipelines",
-    "uid": "cafa5-domain-pipelines",
+    "title": "ProSeqGO Domain Pipelines",
+    "uid": "proseqgo-domain-pipelines",
     "version": 1,
     "weekStart": ""
   }

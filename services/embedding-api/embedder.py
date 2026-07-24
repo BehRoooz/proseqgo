@@ -4,15 +4,15 @@ from pathlib import Path
 import sys
 
 import numpy as np
-import torch
 
 # Make repo root importable when running uvicorn with --app-dir services/embedding-api
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.embed_sequences import HF_MODEL_REGISTRY, embed_sequences, normalize_sequence
-from src.utils import get_device
+from scripts.embed_sequences import HF_MODEL_REGISTRY, embed_sequences  # noqa: E402
+from src.preprocess.sequences import normalize_sequence  # noqa: E402
+from src.utils import get_device  # noqa: E402
 
 
 _MODEL_CACHE: dict[str, tuple[object, object]] = {}

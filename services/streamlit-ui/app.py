@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import os
 from typing import Any
 
@@ -10,8 +9,16 @@ import streamlit as st
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException
 
+from validation import (
+    MAX_FASTA_UPLOAD_BYTES,
+    normalize_sequence,
+    validate_fasta_upload,
+    validate_gateway_auth,
+    validate_sequence,
+)
 
-PROJECT_TITLE = "CAFA-5 MLOps Solution"
+
+PROJECT_TITLE = "ProSeqGO"
 PROJECT_DESCRIPTION = (
     "Interactive sequence-to-GO inference UI backed by the embedding and GO "
     "prediction APIs through the NGINX gateway."
@@ -20,12 +27,10 @@ DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost")
 PREDICT_SEQUENCES_ENDPOINT = "/api/v1/predict-go-from-sequences"
 PREDICT_FASTA_ENDPOINT = "/api/v1/predict-go-from-fasta"
 MAX_TOP_K = 500
-MAX_FASTA_UPLOAD_BYTES = 5 * 1024 * 1024  # must match embedding-api config + nginx route
 SEQUENCE_TIMEOUT_SECONDS = 600
 FASTA_TIMEOUT_SECONDS = 1800
 PREDICTION_MODE_SEQUENCE = "Prediction with sequence"
 PREDICTION_MODE_FASTA = "Prediction with FASTA"
-AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
 WORKFLOW_DOT = """
 digraph cafa5 {
     rankdir=LR;
@@ -45,48 +50,6 @@ digraph cafa5 {
     ui -> user;
 }
 """.strip()
-
-
-def normalize_sequence(raw_sequence: str) -> str:
-    compact = re.sub(r"\s+", "", raw_sequence or "")
-    return compact.upper()
-
-
-def validate_sequence(sequence: str) -> tuple[bool, str]:
-    if not sequence:
-        return False, "Sequence is empty after whitespace cleanup."
-    if not AA_PATTERN.fullmatch(sequence):
-        return (
-            False,
-            "Sequence includes invalid symbols. Allowed amino acids: ACDEFGHIKLMNPQRSTVWY.",
-        )
-    return True, ""
-
-
-def validate_fasta_upload(file_bytes: bytes, filename: str) -> tuple[bool, str]:
-    if not file_bytes:
-        return False, "Uploaded FASTA file is empty."
-    if len(file_bytes) > MAX_FASTA_UPLOAD_BYTES:
-        max_mb = MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)
-        return False, f"FASTA file exceeds the {max_mb} MB upload limit."
-    try:
-        fasta_text = file_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        return False, "FASTA file must be valid UTF-8 text."
-    if not fasta_text.strip():
-        return False, "Uploaded FASTA file contains no sequence data."
-    record_count = sum(1 for line in fasta_text.splitlines() if line.startswith(">"))
-    if record_count == 0:
-        return False, "FASTA file has no records (lines starting with '>')."
-    return True, ""
-
-
-def validate_gateway_auth(gateway_base_url: str, username: str, password: str) -> str | None:
-    if not gateway_base_url.strip():
-        return "Gateway base URL is required."
-    if not username.strip() or not password:
-        return "Both API username and password are required."
-    return None
 
 
 def parse_error_message(response: requests.Response) -> str:
@@ -228,8 +191,8 @@ def _render_shared_connection_fields(
 
 
 def main() -> None:
-    st.set_page_config(page_title="CAFA-5 UI", page_icon="🧬", layout="wide")
-    st.title("🧬 CAFA-5 Sequence-to-GO Prediction UI")
+    st.set_page_config(page_title="ProSeqGO", page_icon="🧬", layout="wide")
+    st.title("🧬 ProSeqGO: Protein Sequence to GO Prediction")
     st.write(PROJECT_DESCRIPTION)
 
     st.subheader("Platform Links")

@@ -11,27 +11,27 @@ from job_store import JobStore
 from prometheus_client import Counter, Gauge, Histogram
 
 EMBEDDING_JOBS_TOTAL = Counter(
-    "cafa5_embedding_jobs_total",
+    "embedding_jobs_total",
     "Total embedding jobs partitioned by terminal status and backend.",
     labelnames=("status", "backend"),
 )
 EMBEDDING_QUEUE_JOBS = Gauge(
-    "cafa5_embedding_queue_jobs",
+    "embedding_queue_jobs",
     "Embedding jobs currently in each lifecycle state.",
     labelnames=("status",),
 )
 EMBEDDING_JOB_DURATION_SECONDS = Histogram(
-    "cafa5_embedding_job_duration_seconds",
+    "embedding_job_duration_seconds",
     "Embedding job duration in seconds by terminal status and backend.",
     labelnames=("status", "backend"),
 )
 EMBEDDING_SEQUENCES_PROCESSED_TOTAL = Counter(
-    "cafa5_embedding_sequences_processed_total",
+    "embedding_sequences_processed_total",
     "Number of embedded sequences processed by backend.",
     labelnames=("backend",),
 )
 EMBEDDING_ARTIFACT_BYTES = Histogram(
-    "cafa5_embedding_artifact_bytes",
+    "embedding_artifact_bytes",
     "Embedding artifact output size in bytes partitioned by artifact name.",
     labelnames=("artifact_name",),
     buckets=(1024, 10 * 1024, 100 * 1024, 1024**2, 5 * 1024**2, 10 * 1024**2, float("inf")),

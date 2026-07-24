@@ -58,7 +58,11 @@ CAFA-5-MLOps-solution/
 ├── outputs/                      # Splits, labels, checkpoints, artifacts, submissions
 ├── scripts/                      # CLI pipeline entrypoints (preprocess/train/evaluate/predict)
 ├── tests/
+│   ├── unit/                     # Fast pytest suite (no Docker/GPU; CI Phase 1B)
 │   └── smoke/                    # Compose smoke/acceptance checks (not unit tests)
+├── .github/
+│   ├── workflows/ci.yml          # PR/main CI (lint today; tests/images later)
+│   └── CI.md                     # CI scope, GHCR plan, non-goals
 ├── services/
 │   ├── embedding-api/            # Async embedding jobs + sequence->GO orchestration endpoint
 │   ├── go-prediction-api/        # Embedding->GO inference API
@@ -459,7 +463,22 @@ make training-up
 make training-down
 make monitoring-up
 make monitoring-down
+make lint            # Ruff on src/ services/ scripts/
+make test            # Unit tests (tests/unit)
+make build-images    # Build all five product images
+make pull-images     # Pull product images from GHCR (GHCR_TAG=main|sha-...)
+make smoke           # Smoke scripts (Compose stack must already be up)
+make ci-env          # Copy .env.example → .env if missing
 ```
+
+## CI (GitHub Actions)
+
+PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds**. Merges to `main` also **publish to GHCR** (`sha-<fullsha>` + `main`). See [`.github/CI.md`](.github/CI.md).
+
+- Registry: **GHCR** (`ghcr.io/behroooz/proseqgo-*`)
+- CI does **not** run training/GPU/retrain jobs
+- Compose in CI will use `make ci-env` (`.env.example` only)—never commit real secrets
+- Local image rebuild: `make build-images`; pull published: `make pull-images`
 
 ## Service-Specific Documentation
 

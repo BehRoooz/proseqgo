@@ -1,8 +1,8 @@
 groups:
-  - name: cafa5_simple_alerts
+  - name: proseqgo_simple_alerts
     interval: 30s
     rules:
-      - alert: Cafa5ServiceMetricsTargetDown
+      - alert: ProSeqGOServiceMetricsTargetDown
         expr: up{job=~"prometheus|embedding_api_metrics|embedding_worker_metrics|go_prediction_api_metrics|trainer_api_metrics|redis_exporter"} == 0
         for: 2m
         labels:
@@ -11,15 +11,15 @@ groups:
           summary: "Service scrape target down: {{ $labels.job }}"
           description: "{{ $labels.instance }} is down for >2m"
 
-      - alert: Cafa5HighHttp5xxRatio
+      - alert: ProSeqGOHighHttp5xxRatio
         expr: |
           (
-            sum by (service) (rate(cafa5_http_requests_total{status_code=~"5.."}[5m]))
+            sum by (service) (rate(http_requests_total{status_code=~"5.."}[5m]))
             /
-            clamp_min(sum by (service) (rate(cafa5_http_requests_total[5m])), 0.001)
+            clamp_min(sum by (service) (rate(http_requests_total[5m])), 0.001)
           ) > 0.05
           and
-          sum by (service) (rate(cafa5_http_requests_total[5m])) > 0.1
+          sum by (service) (rate(http_requests_total[5m])) > 0.1
         for: 10m
         labels:
           severity: warning
@@ -27,8 +27,8 @@ groups:
           summary: "High 5xx ratio on {{ $labels.service }}"
           description: "5xx ratio >5% for 10m with enough traffic"
 
-      - alert: Cafa5EmbeddingQueueBacklogHigh
-        expr: cafa5_embedding_queue_jobs{status="queued"} > 20
+      - alert: ProSeqGOEmbeddingQueueBacklogHigh
+        expr: embedding_queue_jobs{status="queued"} > 20
         for: 10m
         labels:
           severity: warning
@@ -36,11 +36,11 @@ groups:
           summary: "Embedding queue backlog high"
           description: "Queued embedding jobs >20 for 10m"
 
-      - alert: Cafa5EmbeddingWorkerDownWithBacklog
+      - alert: ProSeqGOEmbeddingWorkerDownWithBacklog
         expr: |
           up{job="embedding_worker_metrics"} == 0
           and
-          cafa5_rq_queue_length{queue="embedding-jobs"} > 0
+          rq_queue_length{queue="embedding-jobs"} > 0
         for: 5m
         labels:
           severity: critical
@@ -48,7 +48,7 @@ groups:
           summary: "Embedding RQ worker down while queue has jobs"
           description: "embedding-worker scrape is down and Redis queue embedding-jobs is non-empty"
 
-      - alert: Cafa5RedisDown
+      - alert: ProSeqGORedisDown
         expr: redis_up == 0
         for: 2m
         labels:

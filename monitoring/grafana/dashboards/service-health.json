@@ -62,7 +62,7 @@
         "gridPos": { "h": 8, "w": 18, "x": 6, "y": 0 },
         "targets": [
           {
-            "expr": "sum by (service, route) (rate(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\",status_code=~\"$status_code\"}[5m]))",
+            "expr": "sum by (service, route) (rate(http_requests_total{service=~\"$service\",route=~\"$route\",status_code=~\"$status_code\"}[5m]))",
             "legendFormat": "{{service}} {{route}}",
             "refId": "A"
           }
@@ -81,7 +81,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 0, "y": 6 },
         "targets": [
           {
-            "expr": "sum(rate(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\"}[5m])), 1e-9)",
+            "expr": "sum(rate(http_requests_total{service=~\"$service\",route=~\"$route\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\"}[5m])), 1e-9)",
             "refId": "A"
           }
         ],
@@ -99,7 +99,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 8, "y": 6 },
         "targets": [
           {
-            "expr": "histogram_quantile(0.95, sum by (le, service, route) (rate(cafa5_http_request_duration_seconds_bucket{service=~\"$service\",route=~\"$route\",status_code=~\"$status_code\"}[5m])))",
+            "expr": "histogram_quantile(0.95, sum by (le, service, route) (rate(http_request_duration_seconds_bucket{service=~\"$service\",route=~\"$route\",status_code=~\"$status_code\"}[5m])))",
             "legendFormat": "{{service}} {{route}} p95",
             "refId": "A"
           }
@@ -118,7 +118,7 @@
         "gridPos": { "h": 8, "w": 8, "x": 16, "y": 6 },
         "targets": [
           {
-            "expr": "sum by (service) (cafa5_http_in_flight_requests{service=~\"$service\"})",
+            "expr": "sum by (service) (http_in_flight_requests{service=~\"$service\"})",
             "legendFormat": "{{service}}",
             "refId": "A"
           }
@@ -133,7 +133,7 @@
     "refresh": "30s",
     "schemaVersion": 39,
     "style": "dark",
-    "tags": ["cafa5", "operations", "http"],
+    "tags": ["cafa5", "operations", "http", "proseqgo"],
     "templating": {
       "list": [
         {
@@ -142,9 +142,9 @@
           "label": "Service",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_http_requests_total, service)",
+          "definition": "label_values(http_requests_total, service)",
           "query": {
-            "query": "label_values(cafa5_http_requests_total, service)",
+            "query": "label_values(http_requests_total, service)",
             "refId": "ServiceVar"
           },
           "multi": true,
@@ -158,9 +158,9 @@
           "label": "Route",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_http_requests_total{service=~\"$service\"}, route)",
+          "definition": "label_values(http_requests_total{service=~\"$service\"}, route)",
           "query": {
-            "query": "label_values(cafa5_http_requests_total{service=~\"$service\"}, route)",
+            "query": "label_values(http_requests_total{service=~\"$service\"}, route)",
             "refId": "RouteVar"
           },
           "multi": true,
@@ -174,9 +174,9 @@
           "label": "Status Code",
           "hide": 0,
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "definition": "label_values(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\"}, status_code)",
+          "definition": "label_values(http_requests_total{service=~\"$service\",route=~\"$route\"}, status_code)",
           "query": {
-            "query": "label_values(cafa5_http_requests_total{service=~\"$service\",route=~\"$route\"}, status_code)",
+            "query": "label_values(http_requests_total{service=~\"$service\",route=~\"$route\"}, status_code)",
             "refId": "StatusVar"
           },
           "multi": true,
@@ -189,8 +189,8 @@
     "time": { "from": "now-6h", "to": "now" },
     "timepicker": {},
     "timezone": "",
-    "title": "CAFA5 Service Health",
-    "uid": "cafa5-service-health",
+    "title": "ProSeqGO Service Health",
+    "uid": "proseqgo-service-health",
     "version": 1,
     "weekStart": ""
   }
