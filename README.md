@@ -1,6 +1,6 @@
-# CAFA-5 MLOps Solution
+# ProSeqGO: Protein Sequence Gene Onthology prediction
 
-End-to-end MLOps platform for CAFA-5 protein function prediction (sequence -> embedding -> GO terms), with model lifecycle management, secured gateway routing, and production-oriented monitoring.
+End-to-end MLOps platform for protein function prediction (sequence -> embedding -> GO terms), with model lifecycle management, secured gateway routing, and production-oriented monitoring.
 
 ## Problem This Project Solves
 
@@ -469,6 +469,7 @@ make build-images    # Build all five product images
 make pull-images     # Pull product images from GHCR (GHCR_TAG=main|sha-...)
 make smoke           # Smoke scripts (Compose stack must already be up)
 make ci-env          # Copy .env.example → .env if missing
+make gateway-auth    # Write nginx/.htpasswd-* from GATEWAY_* in .env
 ```
 
 ## CI (GitHub Actions)
@@ -477,7 +478,7 @@ PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds**
 
 - Registry: **GHCR** (`ghcr.io/behroooz/proseqgo-*`)
 - CI does **not** run training/GPU/retrain jobs
-- Compose in CI will use `make ci-env` (`.env.example` only)—never commit real secrets
+- Compose secrets: `.env` from `.env.example`; gateway Basic Auth via `make gateway-auth` (`GATEWAY_ADMIN_*` ≠ `GATEWAY_USER_*`)
 - Local image rebuild: `make build-images`; pull published: `make pull-images`
 
 ## Service-Specific Documentation

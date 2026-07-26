@@ -1,33 +1,45 @@
 #!/usr/bin/env bash
 # Smoke test for the Embedding API (direct uvicorn or via nginx gateway on port 80).
 # Usage (from repo root):
+#   make gateway-auth          # once: sync nginx htpasswd from .env
 #   ./tests/smoke/smoke_embedding_api.sh
 #   BASE_URL=http://127.0.0.1:8000 ./tests/smoke/smoke_embedding_api.sh
-#   CURL_INSECURE=1 API_USER=user API_PASS=secret \
-#     BASE_URL=https://localhost ./tests/smoke/smoke_embedding_api.sh
+#
+# Credentials come from .env:
+#   GATEWAY_ADMIN_* → /api/v1/health, /api/v1/jobs, artifacts
+#   GATEWAY_USER_*  → /api/v1/predict-go-from-fasta
+# Overrides: ADMIN_USER/ADMIN_PASS, API_USER/API_PASS (predict user).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=../../scripts/load_gateway_env.sh
+source "${REPO_ROOT}/scripts/load_gateway_env.sh"
+load_gateway_env "${REPO_ROOT}"
+
 BASE_URL="${BASE_URL:-http://127.0.0.1}"
 FASTA_EXAMPLE="${REPO_ROOT}/examples/small_sequences.fasta"
 MAX_FASTA_UPLOAD_BYTES=$((5 * 1024 * 1024))
 
-CURL_OPTS=(-sS)
-if [[ -n "${CURL_INSECURE:-}" ]]; then
-  CURL_OPTS+=(-k)
-fi
-if [[ -n "${API_USER:-}" && -n "${API_PASS:-}" ]]; then
-  CURL_OPTS+=(-u "${API_USER}:${API_PASS}")
-fi
+ADMIN_USER="${ADMIN_USER:-${GATEWAY_ADMIN_USER}}"
+ADMIN_PASS="${ADMIN_PASS:-${GATEWAY_ADMIN_PASSWORD}}"
+API_USER="${API_USER:-${GATEWAY_USER}}"
+API_PASS="${API_PASS:-${GATEWAY_USER_PASSWORD}}"
 
-echo "==> Health: GET ${BASE_URL}/api/v1/health"
-curl "${CURL_OPTS[@]}" "${BASE_URL}/api/v1/health"
+CURL_BASE=(-sS)
+if [[ -n "${CURL_INSECURE:-}" ]]; then
+  CURL_BASE+=(-k)
+fi
+ADMIN_CURL=("${CURL_BASE[@]}" -u "${ADMIN_USER}:${ADMIN_PASS}")
+USER_CURL=("${CURL_BASE[@]}" -u "${API_USER}:${API_PASS}")
+
+echo "==> Health: GET ${BASE_URL}/api/v1/health (admin)"
+curl "${ADMIN_CURL[@]}" "${BASE_URL}/api/v1/health"
 echo
 
-echo "==> Submit job: POST ${BASE_URL}/api/v1/jobs"
-RESP="$(curl "${CURL_OPTS[@]}" -X POST "${BASE_URL}/api/v1/jobs" \
+echo "==> Submit job: POST ${BASE_URL}/api/v1/jobs (admin)"
+RESP="$(curl "${ADMIN_CURL[@]}" -X POST "${BASE_URL}/api/v1/jobs" \
   -H "Content-Type: application/json" \
   -d '{
     "stage": "test",
@@ -47,7 +59,7 @@ echo "==> Job ID: ${JOB_ID}"
 
 echo "==> Poll until succeeded (max ~120s)"
 for _ in $(seq 1 60); do
-  ST="$(curl "${CURL_OPTS[@]}" "${BASE_URL}/api/v1/jobs/${JOB_ID}")"
+  ST="$(curl "${ADMIN_CURL[@]}" "${BASE_URL}/api/v1/jobs/${JOB_ID}")"
   STATUS="$(printf '%s' "$ST" | python3 -c "import sys, json; print(json.load(sys.stdin)['status'])")"
   if [[ "$STATUS" == "succeeded" ]]; then
     echo "$ST" | python3 -m json.tool
@@ -67,9 +79,9 @@ fi
 
 OUT_DIR="$(mktemp -d)"
 echo "==> Download artifacts to ${OUT_DIR}"
-curl "${CURL_OPTS[@]}" -o "${OUT_DIR}/test_ids.npy" \
+curl "${ADMIN_CURL[@]}" -o "${OUT_DIR}/test_ids.npy" \
   "${BASE_URL}/api/v1/jobs/${JOB_ID}/artifacts/test_ids.npy"
-curl "${CURL_OPTS[@]}" -o "${OUT_DIR}/test_embeddings.npy" \
+curl "${ADMIN_CURL[@]}" -o "${OUT_DIR}/test_embeddings.npy" \
   "${BASE_URL}/api/v1/jobs/${JOB_ID}/artifacts/test_embeddings.npy"
 
 echo "==> Verify shapes (expect N=2, D=1280 for esm2, float32)"
@@ -87,8 +99,8 @@ assert str(emb.dtype) == "float32"
 print("OK")
 PY
 
-echo "==> Predict GO from FASTA: POST ${BASE_URL}/api/v1/predict-go-from-fasta"
-PRED_RESP="$(curl "${CURL_OPTS[@]}" --max-time 1800 -X POST \
+echo "==> Predict GO from FASTA: POST ${BASE_URL}/api/v1/predict-go-from-fasta (user)"
+PRED_RESP="$(curl "${USER_CURL[@]}" --max-time 1800 -X POST \
   "${BASE_URL}/api/v1/predict-go-from-fasta" \
   -F "fasta_file=@${FASTA_EXAMPLE}" \
   -F "backend=esm2" \
@@ -116,7 +128,7 @@ PY
 echo "==> FASTA upload too large: expect HTTP 413 (max ${MAX_FASTA_UPLOAD_BYTES} bytes)"
 LARGE_FASTA="$(mktemp)"
 python3 -c "import sys; sys.stdout.buffer.write(b'x' * (${MAX_FASTA_UPLOAD_BYTES} + 1))" >"${LARGE_FASTA}"
-HTTP_CODE="$(curl "${CURL_OPTS[@]}" -o /dev/null -w "%{http_code}" -X POST \
+HTTP_CODE="$(curl "${USER_CURL[@]}" -o /dev/null -w "%{http_code}" -X POST \
   "${BASE_URL}/api/v1/predict-go-from-fasta" \
   -F "fasta_file=@${LARGE_FASTA};type=text/plain" \
   -F "backend=esm2")"

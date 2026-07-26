@@ -16,7 +16,7 @@ The Streamlit app in `services/streamlit-ui/app.py` includes:
   - protein sequence input,
   - `top_k` input (`1..500`),
   - gateway base URL input (defaults from `GATEWAY_BASE_URL` env var),
-  - API username/password fields,
+  - API username/password fields (defaults from `GATEWAY_USER` / `GATEWAY_USER_PASSWORD`),
   - optional TLS verification toggle.
 - Input QC and validation:
   - trims whitespace/newlines from sequence,
@@ -100,7 +100,8 @@ Important auth boundary:
 
 - Streamlit UI path itself is public (`/ui/`).
 - Prediction endpoint `/api/v1/predict-go-from-sequences` still uses NGINX basic auth (`.htpasswd-user`).
-- Credentials are provided by user in the Streamlit form and sent with each API request.
+- Defaults come from `.env` via Compose (`GATEWAY_USER` / `GATEWAY_USER_PASSWORD`). Run `make gateway-auth` so htpasswd matches.
+- Admin credentials (`GATEWAY_ADMIN_*`) are for `/mlflow` and admin `/api/v1` routes — not the public UI defaults.
 
 ## Run And Access
 

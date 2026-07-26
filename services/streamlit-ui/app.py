@@ -24,6 +24,9 @@ PROJECT_DESCRIPTION = (
     "prediction APIs through the NGINX gateway."
 )
 DEFAULT_GATEWAY_URL = os.getenv("GATEWAY_BASE_URL", "http://localhost")
+# Public predict-route defaults (must match nginx/.htpasswd-user from make gateway-auth).
+DEFAULT_API_USERNAME = os.getenv("GATEWAY_USER", "")
+DEFAULT_API_PASSWORD = os.getenv("GATEWAY_USER_PASSWORD", "")
 PREDICT_SEQUENCES_ENDPOINT = "/api/v1/predict-go-from-sequences"
 PREDICT_FASTA_ENDPOINT = "/api/v1/predict-go-from-fasta"
 MAX_TOP_K = 500
@@ -184,8 +187,8 @@ def _render_shared_connection_fields(
 ) -> tuple[str, str, str, bool, int]:
     top_k = st.number_input("top_k", min_value=1, max_value=MAX_TOP_K, value=10, step=1)
     gateway_base_url_input = st.text_input("Gateway base URL", value=gateway_base_url)
-    username = st.text_input("API username")
-    password = st.text_input("API password", type="password")
+    username = st.text_input("API username", value=DEFAULT_API_USERNAME)
+    password = st.text_input("API password", type="password", value=DEFAULT_API_PASSWORD)
     verify_tls = st.checkbox("Verify TLS", value=verify_tls_default)
     return gateway_base_url_input, username, password, verify_tls, int(top_k)
 
