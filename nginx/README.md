@@ -15,6 +15,7 @@ This milestone introduced NGINX as the single ingress gateway for the CAFA-5 MLO
 - **Authentication segmentation:**  
   - Admin-only access for embedding endpoints and MLflow (`.htpasswd-admin`).  
   - User-level access for prediction endpoints (`.htpasswd-user`).
+  - Local discipline: set distinct `GATEWAY_ADMIN_*` and `GATEWAY_USER_*` in `.env`, then `make gateway-auth`.
 - **Route-level rate limiting:** Separate request budgets for admin and prediction paths with `429` on limit exceed.
 - **Route-specific payload limits:** Enforced `client_max_body_size` per endpoint group to protect upstream services.
 - **Hardened proxy timeouts:** Long read/send timeouts for model/training workloads; bounded connect timeout.
