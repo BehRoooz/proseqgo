@@ -315,6 +315,9 @@ services:
     networks: [proseqgo]
     environment:
       GATEWAY_BASE_URL: http://nginx
+      # Predict-route credentials (public user). Must match make gateway-auth / .htpasswd-user.
+      GATEWAY_USER: ${GATEWAY_USER:-user}
+      GATEWAY_USER_PASSWORD: ${GATEWAY_USER_PASSWORD:-change-me-gateway-user}
     depends_on:
       - embedding-api
       - go-prediction-api
