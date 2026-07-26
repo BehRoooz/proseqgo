@@ -1,5 +1,5 @@
 .PHONY: help up down restart training-up training-down monitoring-up monitoring-down \
-	up-all down-all lint test build-images pull-images smoke ci-env
+	up-all down-all lint test build-images pull-images smoke ci-env gateway-auth
 
 # Product Python paths linted in CI (Phase 1A). Expand later if needed.
 LINT_PATHS := src services scripts
@@ -37,7 +37,8 @@ help:
 	@echo "  make build-images     - Build all product Docker images"
 	@echo "  make pull-images      - Pull product images from GHCR (GHCR_TAG=main|sha-...)"
 	@echo "  make smoke            - Run Compose smoke scripts (stack must be up)"
-	@echo "  make ci-env           - Copy .env.example -> .env for local/CI Compose"
+	@echo "  make ci-env           - Copy .env.example -> .env if missing"
+	@echo "  make gateway-auth     - Write nginx/.htpasswd-* from GATEWAY_* in .env"
 
 up:
 	docker compose up -d --build
@@ -77,6 +78,9 @@ ci-env:
 		cp .env.example .env; \
 		echo "Created .env from .env.example"; \
 	fi
+
+gateway-auth: ci-env
+	./scripts/prepare_gateway_auth.sh
 
 lint:
 	ruff check $(LINT_PATHS)
