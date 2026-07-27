@@ -18,7 +18,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 source "${REPO_ROOT}/scripts/load_gateway_env.sh"
 load_gateway_env "${REPO_ROOT}"
 
-BASE_URL="${BASE_URL:-http://127.0.0.1}"
+BASE_URL="${BASE_URL:-http://localhost}"
 FASTA_EXAMPLE="${REPO_ROOT}/examples/small_sequences.fasta"
 MAX_FASTA_UPLOAD_BYTES=$((5 * 1024 * 1024))
 
@@ -111,11 +111,11 @@ PRED_RESP="$(curl "${USER_CURL[@]}" --max-time 1800 -X POST \
   -F "fail_fast=true")"
 echo "$PRED_RESP"
 
-printf '%s' "$PRED_RESP" | python3 <<'PY'
-import json
-import sys
 
-data = json.load(sys.stdin)
+PRED_RESP="$PRED_RESP" python3 -c '
+import json, os
+data = json.loads(os.environ["PRED_RESP"])
+
 assert data["status"] == "succeeded", data
 results = data["results"]
 assert len(results) == 2, results
@@ -123,7 +123,7 @@ for item in results:
     assert item.get("sequence_id"), item
     assert "predictions" in item and isinstance(item["predictions"], list), item
 print("predict-go-from-fasta OK:", [r["sequence_id"] for r in results])
-PY
+'
 
 echo "==> FASTA upload too large: expect HTTP 413 (max ${MAX_FASTA_UPLOAD_BYTES} bytes)"
 LARGE_FASTA="$(mktemp)"
