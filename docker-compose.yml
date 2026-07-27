@@ -1,7 +1,16 @@
 # Integrated stack: Embedding API + GO Prediction API + MLflow + Training API.
-# Single public entry: nginx on port 80. Run from repo root: docker compose up --build
-# Training API: docker compose --profile training up --build
-# Monitoring: docker compose --profile monitoring up
+# Single public entry: nginx on port 80. Portable base (CPU-safe; no gpus: here).
+#
+# Local (recommended):
+#   make up              # auto-adds docker-compose.gpu.yml when NVIDIA is available
+#   make training-up     # --profile training
+#   make monitoring-up   # --profile monitoring
+#
+# Manual compose:
+#   docker compose up --build
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build   # GPU
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build    # CI / CPU smoke
+#
 # Copy .env.example to .env and set secrets before first run.
 networks:
   proseqgo:
@@ -197,11 +206,9 @@ services:
     working_dir: /app/services/training-api
     profiles: ["training"]
     networks: [proseqgo]
-    gpus: all
     stop_grace_period: 2h
     environment:
       <<: *trainer-env
-      NVIDIA_VISIBLE_DEVICES: all
       WORKER_METRICS_PORT: "8001"
     depends_on:
       trainer-api:
@@ -258,11 +265,9 @@ services:
     image: proseqgo-embedding-api:local
     working_dir: /app/services/embedding-api
     networks: [proseqgo]
-    gpus: all
     stop_grace_period: 3700s
     environment:
       <<: *embedding-env
-      NVIDIA_VISIBLE_DEVICES: all
       WORKER_METRICS_PORT: "8001"
       # Gives crash-recovery tests a reliable kill window after mark_running.
       EMBEDDING_JOB_START_DELAY_SEC: ${EMBEDDING_JOB_START_DELAY_SEC:-0}
@@ -286,12 +291,10 @@ services:
     image: proseqgo-go-prediction-api:local
     working_dir: /app/services/go-prediction-api
     networks: [proseqgo]
-    gpus: all
     environment:
       PYTHONUNBUFFERED: "1"
       PYTHONPATH: /app:/app/services/go-prediction-api
       CAFA_DEVICE: auto
-      NVIDIA_VISIBLE_DEVICES: all
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}

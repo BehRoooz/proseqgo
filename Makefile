@@ -1,9 +1,23 @@
 .PHONY: help up down restart training-up training-down monitoring-up monitoring-down \
-	up-all down-all lint test build-images pull-images smoke ci-env gateway-auth
+	all-up all-down lint test build-images pull-images smoke ci-env gateway-auth ci-up ci-down
 
 # Product Python paths linted in CI (Phase 1A). Expand later if needed.
 LINT_PATHS := src services scripts
 PYTHON ?= python3
+
+# Compose file sets (Design A: portable base + optional overlays).
+COMPOSE ?= docker compose
+COMPOSE_BASE := -f docker-compose.yml
+COMPOSE_GPU := -f docker-compose.gpu.yml
+COMPOSE_CI := -f docker-compose.ci.yml
+# Auto-enable GPU overlay when nvidia-smi works (local dev).
+HAS_NVIDIA := $(shell command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1 && echo 1)
+ifeq ($(HAS_NVIDIA),1)
+COMPOSE_DEV_FILES := $(COMPOSE_BASE) $(COMPOSE_GPU)
+else
+COMPOSE_DEV_FILES := $(COMPOSE_BASE)
+endif
+COMPOSE_CI_FILES := $(COMPOSE_BASE) $(COMPOSE_CI)
 
 # Image names match docker-compose.yml local tags.
 EMBEDDING_IMAGE ?= proseqgo-embedding-api:local
@@ -26,8 +40,10 @@ GHCR_MLFLOW_IMAGE ?= $(GHCR_REGISTRY)/$(GHCR_OWNER)/proseqgo-mlflow:$(GHCR_TAG)
 
 help:
 	@echo "Available targets:"
-	@echo "  make up               - Start default services with Docker Compose"
-	@echo "  make down             - Stop and remove default Docker Compose services"
+	@echo "  make up               - Start default services (GPU overlay if NVIDIA detected)"
+	@echo "  make down             - Stop default Docker Compose services"
+	@echo "  make ci-up            - Start serving stack for CI/CPU smoke (base + ci overlay)"
+	@echo "  make ci-down          - Stop CI stack and remove volumes"
 	@echo "  make training-up      - Start services with the training profile"
 	@echo "  make training-down    - Stop services started with the training profile"
 	@echo "  make monitoring-up    - Start services with the monitoring profile"
@@ -41,32 +57,38 @@ help:
 	@echo "  make gateway-auth     - Write nginx/.htpasswd-* from GATEWAY_* in .env"
 
 up:
-	docker compose up -d --build
+	$(COMPOSE) $(COMPOSE_DEV_FILES) up -d --build
 
 down:
-	docker compose down
+	$(COMPOSE) $(COMPOSE_DEV_FILES) down
 
 restart:
-	docker compose down
-	docker compose up -d --build
+	$(COMPOSE) $(COMPOSE_DEV_FILES) down
+	$(COMPOSE) $(COMPOSE_DEV_FILES) up -d --build
+
+ci-up: ci-env gateway-auth
+	$(COMPOSE) $(COMPOSE_CI_FILES) up -d --build
+
+ci-down:
+	$(COMPOSE) $(COMPOSE_CI_FILES) down -v
 
 training-up:
-	docker compose --profile training up -d --build
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile training up -d --build
 
 training-down:
-	docker compose --profile training down
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile training down
 
 monitoring-up:
-	docker compose --profile monitoring up -d --build
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile monitoring up -d --build
 
 monitoring-down:
-	docker compose --profile monitoring down
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile monitoring down
 
-up-all:
-	docker compose --profile monitoring --profile training up -d --build
+all-up:
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile monitoring --profile training up -d --build
 
-down-all:
-	docker compose --profile monitoring --profile training down
+all-down:
+	$(COMPOSE) $(COMPOSE_DEV_FILES) --profile monitoring --profile training down
 
 # --- CI / quality (same commands locally and in GitHub Actions) ---
 

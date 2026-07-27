@@ -69,7 +69,9 @@ CAFA-5-MLOps-solution/
 │   ├── streamlit-ui/             # Interactive UI over gateway endpoint
 │   └── training-api/             # Async train/retrain job API
 ├── src/                          # Core modeling/training/inference modules
-├── docker-compose.yml            # Full integrated deployment
+├── docker-compose.yml            # Portable serving stack (CPU-safe base)
+├── docker-compose.gpu.yml        # GPU overlay (gpus: all for inference workers)
+├── docker-compose.ci.yml         # CI overlay (CPU torch, CAFA_DEVICE=cpu, trim backups)
 ├── Makefile                      # Convenience targets for compose profiles
 └── README.md
 ```
@@ -79,16 +81,30 @@ CAFA-5-MLOps-solution/
 ### 1) Bring core stack up
 
 ```bash
-docker compose up --build
-```
-
-or:
-
-```bash
 make up
 ```
 
-Core services started by default: `nginx`, `embedding-api`, `go-prediction-api`, `streamlit-ui`, `mlflow`.
+`make up` uses the portable base compose file and **automatically adds** `docker-compose.gpu.yml` when `nvidia-smi` is available. On CPU-only hosts the stack still starts (inference uses `CAFA_DEVICE=auto` → CPU).
+
+Manual compose (equivalent):
+
+```bash
+# CPU-only / portable
+docker compose up --build
+
+# GPU host (explicit overlay)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+Core services started by default: `nginx`, `embedding-api`, `embedding-worker`, `go-prediction-api`, `streamlit-ui`, `mlflow`.
+
+**CI / CPU smoke** (Phase 3):
+
+```bash
+make ci-up    # base + docker-compose.ci.yml (forces CAFA_DEVICE=cpu, CPU torch wheels)
+make smoke
+make ci-down
+```
 
 ### 2) Bring monitoring up
 
@@ -457,8 +473,10 @@ python scripts/retrain_pipeline.py --config configs/config.yaml \
 ## Useful Make Targets
 
 ```bash
-make up
+make up              # Default stack (GPU overlay if NVIDIA detected)
 make down
+make ci-up           # CPU CI/smoke stack (base + ci overlay)
+make ci-down         # Stop CI stack and remove volumes
 make training-up
 make training-down
 make monitoring-up
@@ -477,6 +495,8 @@ make gateway-auth    # Write nginx/.htpasswd-* from GATEWAY_* in .env
 PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds**. Merges to `main` also **publish to GHCR** (`sha-<fullsha>` + `main`). See [`.github/CI.md`](.github/CI.md).
 
 - Registry: **GHCR** (`ghcr.io/behroooz/proseqgo-*`)
+- Compose: portable **base** + **`docker-compose.ci.yml`** for CPU smoke (`make ci-up`)
+- GPU local dev: **base** + **`docker-compose.gpu.yml`** (`make up` auto-detects NVIDIA)
 - CI does **not** run training/GPU/retrain jobs
 - Compose secrets: `.env` from `.env.example`; gateway Basic Auth via `make gateway-auth` (`GATEWAY_ADMIN_*` ≠ `GATEWAY_USER_*`)
 - Local image rebuild: `make build-images`; pull published: `make pull-images`
