@@ -1,0 +1,19 @@
+# GPU overlay for local dev / GPU hosts. Merge with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+# Or use: make up (auto-detects NVIDIA via nvidia-smi)
+
+services:
+  embedding-worker:
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+
+  go-prediction-api:
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+
+  trainer-worker:
+    gpus: all
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all

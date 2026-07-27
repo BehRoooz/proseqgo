@@ -1,0 +1,32 @@
+# CI / CPU smoke overlay. Merge with docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --build
+# Or use: make ci-up
+
+services:
+  embedding-api:
+    environment:
+      CAFA_DEVICE: cpu
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+  embedding-worker:
+    environment:
+      CAFA_DEVICE: cpu
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+  go-prediction-api:
+    environment:
+      CAFA_DEVICE: cpu
+    build:
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+  # Ops sidecars not needed for serving smoke; profile prevents startup unless explicitly enabled.
+  postgres-backup:
+    profiles: ["ci-skip"]
+
+  backup-offload:
+    profiles: ["ci-skip"]
