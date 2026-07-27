@@ -130,6 +130,45 @@ or:
 make training-up
 ```
 
+### 4) Training data (preprocess / train)
+
+Serving (`make up`) does **not** need these files. They are required for CLI preprocess, embedding generation, training, and holdout evaluation.
+
+Dataset on Kaggle: [cafa-5-6-train-dataset](https://www.kaggle.com/datasets/behrouzmirabdi/cafa-5-6-train-dataset)
+
+**Expected layout** (matches `configs/config.yaml`):
+
+```text
+data/cafa-5-cafa-6-protein-function-prediction/
+└── Train/
+    ├── train_sequences.fasta
+    └── train_terms.tsv
+```
+
+**Download via Kaggle CLI** (requires [`kaggle`](https://github.com/Kaggle/kaggle-cli) and `~/.kaggle/kaggle.json`):
+
+```bash
+mkdir -p data/cafa-5-cafa-6-protein-function-prediction/Train
+kaggle datasets download -d behrouzmirabdi/cafa-5-6-train-dataset \
+  -p data/cafa-5-cafa-6-protein-function-prediction/Train --unzip
+```
+
+Alternatively, download the zip from the Kaggle page in a browser and extract so the two files end under `Train/` as shown above.
+
+**Verify integrity** (sha256 of the files this repo was developed against):
+
+```bash
+sha256sum data/cafa-5-cafa-6-protein-function-prediction/Train/train_sequences.fasta \
+          data/cafa-5-cafa-6-protein-function-prediction/Train/train_terms.tsv
+```
+
+Expected digests:
+
+| File | sha256 |
+|------|--------|
+| `train_sequences.fasta` | `434addef94c14eb8fb263ad2f5801a73a43fcb69d10955e5463d20c6b8aaac82` |
+| `train_terms.tsv` | `c9489b802b8955d3cb14c23cc465674de86e08ad23107296260c8a8040361535` |
+
 ## Access Points
 
 - Gateway root: `https://localhost`
