@@ -465,13 +465,13 @@ Key on-disk artifacts (repo `outputs/` volume):
 
 Prometheus metrics (scraped when the `monitoring` profile is active):
 
-- `cafa5_training_jobs_total` — terminal jobs by status and mode (worker `:8001`)
-- `cafa5_training_queue_jobs` — jobs per lifecycle state (Postgres-backed)
-- `cafa5_rq_queue_length` — Redis/RQ pending length
-- `cafa5_training_job_duration_seconds` — job duration histogram
-- `cafa5_training_subprocess_failures_total` — failure reasons
+- `training_jobs_total` — terminal jobs by status and mode (worker `:8001`)
+- `training_queue_jobs` — jobs per lifecycle state (Postgres-backed)
+- `rq_queue_length` — Redis/RQ pending length
+- `training_job_duration_seconds` — job duration histogram
+- `training_subprocess_failures_total` — failure reasons
 
-HTTP metrics: `cafa5_http_requests_total`, `cafa5_http_request_duration_seconds`.
+HTTP metrics: `http_requests_total`, `http_request_duration_seconds`.
 
 ## Troubleshooting
 

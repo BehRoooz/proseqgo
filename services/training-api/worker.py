@@ -14,22 +14,22 @@ from prometheus_client import Counter, Gauge, Histogram
 
 APP_ROOT = Path(__file__).resolve().parents[2]
 TRAINING_JOBS_TOTAL = Counter(
-    "cafa5_training_jobs_total",
+    "training_jobs_total",
     "Total training jobs partitioned by terminal status and mode.",
     labelnames=("status", "mode"),
 )
 TRAINING_QUEUE_JOBS = Gauge(
-    "cafa5_training_queue_jobs",
+    "training_queue_jobs",
     "Training jobs currently in each lifecycle state.",
     labelnames=("status",),
 )
 TRAINING_JOB_DURATION_SECONDS = Histogram(
-    "cafa5_training_job_duration_seconds",
+    "training_job_duration_seconds",
     "Training job duration in seconds by terminal status and mode.",
     labelnames=("status", "mode"),
 )
 TRAINING_SUBPROCESS_FAILURES_TOTAL = Counter(
-    "cafa5_training_subprocess_failures_total",
+    "training_subprocess_failures_total",
     "Training subprocess failures partitioned by failure reason.",
     labelnames=("reason",),
 )

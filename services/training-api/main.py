@@ -21,31 +21,31 @@ registry = CollectorRegistry()
 SERVICE_NAME = "trainer-api"
 
 HTTP_REQUESTS_TOTAL = Counter(
-    "cafa5_http_requests_total",
+    "http_requests_total",
     "Total number of HTTP requests.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_REQUEST_DURATION_SECONDS = Histogram(
-    "cafa5_http_request_duration_seconds",
+    "http_request_duration_seconds",
     "HTTP request duration in seconds.",
     labelnames=("service", "route", "method", "status_code"),
     registry=registry,
 )
 HTTP_IN_FLIGHT_REQUESTS = Gauge(
-    "cafa5_http_in_flight_requests",
+    "http_in_flight_requests",
     "Number of in-flight HTTP requests.",
     labelnames=("service",),
     registry=registry,
 )
 TRAINING_QUEUE_JOBS = Gauge(
-    "cafa5_training_queue_jobs",
+    "training_queue_jobs",
     "Training jobs currently in each lifecycle state.",
     labelnames=("status",),
     registry=registry,
 )
 RQ_QUEUE_LENGTH = Gauge(
-    "cafa5_rq_queue_length",
+    "rq_queue_length",
     "Redis/RQ queue length for training jobs.",
     labelnames=("queue",),
     registry=registry,
