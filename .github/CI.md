@@ -28,17 +28,35 @@ PR     → build only (GHA layer cache, no push)
 main   → build + push sha-<fullsha> and moving main
 ```
 
-- Torch images use **CPU wheels** in CI (`TORCH_INDEX_URL=.../cpu`) for smaller/faster builds; local Compose still defaults to CUDA index
+- Torch images use **CPU wheels** in CI (`TORCH_INDEX_URL=.../cpu`) for smaller/faster builds; local `make build-images` defaults to CUDA index (`cu132`)
 - Local build: `make build-images`
 - Pull published images: `make pull-images` or `GHCR_TAG=sha-<fullsha> make pull-images`
 - First publish happens after this workflow runs on **`main`**. Packages may be private by default; set package visibility in GitHub Packages if others need to pull.
+
+## Compose overlays (Design A)
+
+| File | Purpose |
+|------|---------|
+| `docker-compose.yml` | Portable base (all services; no `gpus:`) |
+| `docker-compose.gpu.yml` | Adds `gpus: all` for inference/training workers |
+| `docker-compose.ci.yml` | CPU smoke: `CAFA_DEVICE=cpu`, CPU torch build args, skips backup sidecars |
+
+```bash
+make up        # base + gpu overlay when nvidia-smi works
+make ci-up     # base + ci overlay (also runs ci-env + gateway-auth)
+make ci-down   # tear down CI stack with volumes
+```
 
 ## Compose / secrets in CI (Phase 3)
 
 Workflows must never commit real secrets. Pattern:
 
 ```bash
-make ci-env   # copies .env.example → .env if missing
+make ci-env        # copies .env.example → .env if missing
+make gateway-auth  # nginx htpasswd from GATEWAY_* in .env
+make ci-up         # serving stack on CPU
+make smoke
+make ci-down
 ```
 
 Use throwaway passwords from `.env.example` only inside ephemeral CI runners.

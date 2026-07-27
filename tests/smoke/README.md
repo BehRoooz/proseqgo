@@ -7,6 +7,15 @@
 #
 #   make gateway-auth
 #
+# Local (GPU if available):
+#   make up
+#   make smoke
+#
+# CPU / CI stack (base + docker-compose.ci.yml):
+#   make ci-up      # also runs ci-env + gateway-auth
+#   make smoke
+#   make ci-down
+#
 # From repo root (stack must be up):
 #   ./tests/smoke/smoke_embedding_api.sh
 #   ./tests/smoke/test_embedding_worker_crash_recovery.sh
