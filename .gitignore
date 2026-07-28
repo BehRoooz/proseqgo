@@ -123,9 +123,8 @@ docker-compose.override.yml
 Thumbs.db
 
 ##########################
-# Docs / Notes (local only)
+# Notes (local only)
 ##########################
-docs/
 notes/
 
 ##########################
