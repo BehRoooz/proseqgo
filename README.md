@@ -1,151 +1,114 @@
-# ProSeqGO: Protein Sequence Gene Onthology prediction
+# ProSeqGO
 
-End-to-end MLOps platform for protein function prediction (sequence -> embedding -> GO terms), with model lifecycle management, secured gateway routing, and production-oriented monitoring.
+Production-oriented MLOps platform for **multi-label Gene Ontology (GO) prediction** from protein sequences: reproducible training, registry-based serving, secured gateway routing, async job queues, and observability.
 
-## Problem This Project Solves
+```text
+sequence → embedding (ESM2 / ProtBERT / T5) → GO term predictions
+```
 
-Protein function annotation is a high-throughput, multi-label prediction problem where operational risks are as important as model quality: inconsistent embedding backends, untracked model promotions, and weak runtime observability can silently degrade prediction quality.
+| Audience | Entry point |
+|----------|-------------|
+| Product / lab users | Streamlit UI (`/ui/`) or predict APIs |
+| ML engineers | CLI (`scripts/`) and Training API |
+| Platform / ops | Docker Compose, NGINX, Prometheus / Grafana |
+| Auditors | MLflow tracking and model registry (`/mlflow/`) |
 
-This project provides:
+## Overview
 
-- A reproducible training and retraining workflow.
-- Online inference APIs for both embedding-level and sequence-level use cases.
-- MLflow-backed experiment tracking and registry-based model serving.
-- A secured NGINX gateway for TLS, auth, and rate/body constraints.
-- Monitoring with Prometheus, Grafana dashboards, and actionable alert rules.
+Protein function annotation is a high-throughput, multi-label problem where operational risk matters as much as model quality: untracked promotions, embedding/model dimension drift, and weak runtime signals can silently degrade predictions.
 
-## High-Level Workflow
+ProSeqGO provides:
 
-1. Preprocess CAFA labels and generate deterministic train/holdout splits.
-2. Generate embeddings from protein sequences (ESM2/ProtBERT/T5).
-3. Train and evaluate multi-label GO predictor.
-4. Log runs/artifacts to MLflow and register model versions.
-5. Promote model alias (`champion`) after metric threshold checks.
-6. Serve predictions:
-   - `embedding -> GO` via GO prediction API.
-   - `sequence -> GO` in one call via embedding API orchestration.
-7. Observe service health and model-serving behavior with Prometheus/Grafana.
+1. Preprocess CAFA labels and deterministic train/holdout splits
+2. Generate embeddings from protein sequences
+3. Train and evaluate a multi-label GO predictor
+4. Log runs and register models in MLflow
+5. Promote a `champion` alias after metric threshold checks
+6. Serve predictions (`embedding → GO` and `sequence → GO`)
+7. Observe health, latency, errors, and queue backlog
 
-## Architecture Overview
+**Data source:** [cafa-5-6-train-dataset](https://www.kaggle.com/datasets/behrouzmirabdi/cafa-5-6-train-dataset) on Kaggle (required for training/evaluation; not required for inference-only serving once a champion model exists).
+
+## Key features
+
+- Reproducible training on a version-pinned Kaggle dataset (checksums documented)
+- Config-driven preprocess → embed → train → evaluate → promote pipeline
+- MLflow experiment tracking and model registry (`@champion` serving)
+- Containerized multi-service stack (Compose base + GPU / CI overlays)
+- Async embedding and training jobs (Postgres history + Redis/RQ)
+- NGINX gateway with Basic Auth tiers, rate limits, and body-size controls
+- Streamlit UI for interactive sequence → GO prediction
+- Prometheus / Grafana monitoring with alert rules
+- CI: lint, unit tests, image builds; GHCR publish on `main`
+
+## Architecture
 
 ```text
 User / Client
    |
    v
-NGINX (TLS + Basic Auth + Rate Limit + Routing)
+NGINX (Basic Auth + Rate Limit + Routing)  :80
    |-----------------------> /ui/ -----------------------> Streamlit UI
    |-----------------------> /api/v1/* ------------------> Embedding API
-   |                                                     |-> Go Prediction API (/predict)
+   |                                                     |-> Go Prediction API
    |-----------------------> /api/predict/* -------------> Go Prediction API
    |-----------------------> /api/train* ----------------> Training API (profile: training)
    |-----------------------> /mlflow/* ------------------> MLflow UI / Registry
 
-Prometheus <---------------- /metrics from embedding/go/training/prometheus
-Grafana <------------------- Prometheus datasource
+Prometheus <---------------- /metrics (APIs, workers, redis-exporter)
+Grafana <------------------- Prometheus
 ```
 
-## Repository Structure
+| Layer | Components |
+|-------|------------|
+| Ingress | `nginx` |
+| Inference | `embedding-api`, `embedding-worker`, `go-prediction-api`, `streamlit-ui` |
+| ML lifecycle | `mlflow`, `trainer-api` / `trainer-worker` (training profile) |
+| Data plane | `postgres` (MLflow + `proseqgo_jobs`), `redis` (RQ), `minio` (artifacts) |
+| Observability | `prometheus`, `grafana`, `redis-exporter` (monitoring profile) |
+
+Serving loads `models:/cafa-go-model@champion` by default (`REGISTERED_MODEL_NAME` / `MODEL_URI`).
+
+**Details:** [docs/architecture.md](docs/architecture.md)
+
+## Repository structure
 
 ```text
-CAFA-5-MLOps-solution/
-├── configs/                      # Global YAML config for data/model/train/inference
-├── data/                         # CAFA data, embeddings, HF cache
-├── docker/                       # Service-specific Dockerfiles
-├── docs/                         # Additional project docs
-├── examples/                     # Example sequences/inputs
-├── monitoring/                   # Prometheus, Grafana provisioning, alert rules
-├── nginx/                        # Gateway config, TLS certs, htpasswd files
-├── outputs/                      # Splits, labels, checkpoints, artifacts, submissions
-├── scripts/                      # CLI pipeline entrypoints (preprocess/train/evaluate/predict)
-├── tests/
-│   ├── unit/                     # Fast pytest suite (no Docker/GPU; CI Phase 1B)
-│   └── smoke/                    # Compose smoke/acceptance checks (not unit tests)
-├── .github/
-│   ├── workflows/ci.yml          # PR/main CI (lint today; tests/images later)
-│   └── CI.md                     # CI scope, GHCR plan, non-goals
+proseqgo/
+├── configs/                 # Global YAML (data / model / train / inference)
+├── data/                    # Kaggle raw data, embeddings, HF cache (gitignored payloads)
+├── docker/                  # Service Dockerfiles and Postgres init
+├── docs/                    # Architecture, data, training, deploy, ops
+├── examples/                # Sample FASTA / inputs
+├── monitoring/              # Prometheus, Grafana, alert rules
+├── nginx/                   # Gateway config and htpasswd (generated)
+├── outputs/                 # Splits, labels, checkpoints, service artifacts
+├── scripts/                 # CLI: preprocess, embed, train, evaluate, promote
 ├── services/
-│   ├── embedding-api/            # Async embedding jobs + sequence->GO orchestration endpoint
-│   ├── go-prediction-api/        # Embedding->GO inference API
-│   ├── streamlit-ui/             # Interactive UI over gateway endpoint
-│   └── training-api/             # Async train/retrain job API
-├── src/                          # Core modeling/training/inference modules
-├── docker-compose.yml            # Portable serving stack (CPU-safe base)
-├── docker-compose.gpu.yml        # GPU overlay (gpus: all for inference workers)
-├── docker-compose.ci.yml         # CI overlay (CPU torch, CAFA_DEVICE=cpu, trim backups)
-├── Makefile                      # Convenience targets for compose profiles
+│   ├── embedding-api/       # Async embeddings + sequence→GO orchestration
+│   ├── go-prediction-api/   # Embedding→GO inference
+│   ├── streamlit-ui/        # Product UI
+│   └── training-api/        # Async train / retrain jobs
+├── src/                     # Core modeling / training / inference libraries
+├── tests/
+│   ├── unit/                # Fast pytest (CI; no Docker/GPU)
+│   └── smoke/               # Compose acceptance scripts
+├── .github/                 # CI workflows and CI notes
+├── docker-compose.yml       # Portable base stack
+├── docker-compose.gpu.yml   # GPU overlay
+├── docker-compose.ci.yml    # CPU CI / smoke overlay
+├── Makefile                 # up / train / monitor / lint / test / smoke
 └── README.md
 ```
 
-## Quick Start
+## Data source and versioning
 
-### 1) Bring core stack up
-
-```bash
-make up
-```
-
-`make up` uses the portable base compose file and **automatically adds** `docker-compose.gpu.yml` when `nvidia-smi` is available. On CPU-only hosts the stack still starts (inference uses `CAFA_DEVICE=auto` → CPU).
-
-Manual compose (equivalent):
-
-```bash
-# CPU-only / portable
-docker compose up --build
-
-# GPU host (explicit overlay)
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
-```
-
-Core services started by default: `nginx`, `embedding-api`, `embedding-worker`, `go-prediction-api`, `streamlit-ui`, `mlflow`.
-
-**CI / CPU smoke** (Phase 3):
-
-```bash
-make ci-up    # base + docker-compose.ci.yml (forces CAFA_DEVICE=cpu, CPU torch wheels)
-make smoke
-make ci-down
-```
-
-### 2) Bring monitoring up
-
-```bash
-docker compose --profile monitoring up -d
-```
-
-or:
-
-```bash
-make monitoring-up
-```
-
-### 3) Optional: bring training API profile up
-
-```bash
-docker compose --profile training up -d --build
-```
-
-or:
-
-```bash
-make training-up
-```
-
-### 4) Training data (preprocess / train)
-
-Serving (`make up`) does **not** need these files. They are required for CLI preprocess, embedding generation, training, and holdout evaluation.
-
-Dataset on Kaggle: [cafa-5-6-train-dataset](https://www.kaggle.com/datasets/behrouzmirabdi/cafa-5-6-train-dataset)
-
-**Expected layout** (matches `configs/config.yaml`):
-
-```text
-data/cafa-5-cafa-6-protein-function-prediction/
-└── Train/
-    ├── train_sequences.fasta
-    └── train_terms.tsv
-```
-
-**Download via Kaggle CLI** (requires [`kaggle`](https://github.com/Kaggle/kaggle-cli) and `~/.kaggle/kaggle.json`):
+| Field | Value |
+|-------|-------|
+| Dataset | [cafa-5-6-train-dataset](https://www.kaggle.com/datasets/behrouzmirabdi/cafa-5-6-train-dataset) |
+| Expected layout | `data/cafa-5-cafa-6-protein-function-prediction/Train/{train_sequences.fasta,train_terms.tsv}` |
+| Access | Kaggle API (`~/.kaggle/kaggle.json`) or browser download |
+| Integrity | SHA-256 checksums in [docs/data.md](docs/data.md) |
 
 ```bash
 mkdir -p data/cafa-5-cafa-6-protein-function-prediction/Train
@@ -153,221 +116,121 @@ kaggle datasets download -d behrouzmirabdi/cafa-5-6-train-dataset \
   -p data/cafa-5-cafa-6-protein-function-prediction/Train --unzip
 ```
 
-Alternatively, download the zip from the Kaggle page in a browser and extract so the two files end under `Train/` as shown above.
+Serving (`make up`) does **not** require these files. Training, embedding generation, and holdout evaluation do.
 
-**Verify integrity** (sha256 of the files this repo was developed against):
+Raw vs processed vs feature data are separated under `data/` and `outputs/`. Do not hardcode machine-specific paths; use `configs/config.yaml` and environment variables.
+
+**Details:** [docs/data.md](docs/data.md)
+
+## Quickstart
+
+### Prerequisites
+
+- Docker + Docker Compose v2
+- `make`, `bash`, `curl`
+- NVIDIA Container Toolkit (optional; GPU overlay)
+- Kaggle credentials (only if downloading training data)
+- Python 3.10+ (for CLI training outside containers)
+
+### 1. Environment and gateway auth
 
 ```bash
-sha256sum data/cafa-5-cafa-6-protein-function-prediction/Train/train_sequences.fasta \
-          data/cafa-5-cafa-6-protein-function-prediction/Train/train_terms.tsv
+make ci-env          # .env.example → .env if missing
+# Edit .env: Postgres, MinIO, GATEWAY_* passwords (admin ≠ user)
+make gateway-auth    # writes nginx/.htpasswd-admin and .htpasswd-user
 ```
 
-Expected digests:
+Never commit `.env` or real htpasswd files.
 
-| File | sha256 |
-|------|--------|
-| `train_sequences.fasta` | `434addef94c14eb8fb263ad2f5801a73a43fcb69d10955e5463d20c6b8aaac82` |
-| `train_terms.tsv` | `c9489b802b8955d3cb14c23cc465674de86e08ad23107296260c8a8040361535` |
-
-## Access Points
-
-- Gateway root: `https://localhost`
-- Streamlit UI: `https://localhost/ui/`
-- MLflow via gateway: `https://localhost/mlflow/`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
-
-## NGINX Architecture
-
-`nginx` is the single public ingress on ports `80/443` and enforces operational policy:
-
-- HTTP->HTTPS redirect.
-- Basic auth tiers:
-  - Admin routes: `/api/v1/*`, `/api/train*`, `/mlflow/`.
-  - User routes: `/api/predict/*`, `/api/v1/predict-go-from-sequences`, `/api/v1/predict-go-from-fasta`.
-- Per-route body size controls:
-  - `/api/v1/`: 512 MB
-  - `/api/v1/predict-go-from-fasta`: 5 MB
-  - `/api/train`: 64 MB
-  - `/api/predict/`: 8 MB
-  - `/mlflow/`: 32 MB
-- Request rate limits:
-  - admin zone `15 r/s` (burst 40)
-  - predict zone `30 r/s` (burst 80)
-- Long-job compatible upstream timeouts (`600s` read/send).
-- Trace headers forwarded upstream (`X-Trace-Id`, auth tier/user context).
-
-## MLflow Architecture
-
-MLflow runs as an internal service and is exposed through gateway path `/mlflow/`.
-
-- **Backend store:** PostgreSQL (`postgres` service, named volume `postgres_data`)
-- **Job history DB:** separate database `proseqgo_jobs` on the same Postgres (embedding + training durable jobs). Init script: `docker/postgres/init-proseqgo-jobs.sh` (first volume only). Existing volumes: `docker compose exec postgres psql -U "$POSTGRES_USER" -c 'CREATE DATABASE proseqgo_jobs;'`
-- **Transient job dispatch:** Redis/RQ (`redis`, AOF volume `redis_data`); workers `embedding-worker` / `trainer-worker`
-- **Artifact store:** MinIO S3-compatible bucket `mlflow-artifacts` (named volume `minio_data`)
-- **Tracking URI for clients:** `http://mlflow:5000` (clients need S3 env vars for direct artifact I/O to MinIO)
-- **Secrets:** copy [`.env.example`](.env.example) to `.env` and set Postgres/MinIO credentials before first run
-- **Backups:** `postgres-backup` dumps to `./backups/postgres/` daily; `backup-offload` copies dumps to MinIO bucket `mlflow-db-backups`
-- Model registry:
-  - registered model name defaults to `cafa-go-model` (override via `REGISTERED_MODEL_NAME` in `.env`).
-  - serving API (`go-prediction-api`) loads `models:/cafa-go-model@champion` by default.
-- Training API returns MLflow run/model URLs in job status payload when available.
-
-Legacy file-backed runs (if any) are archived under `archives/` before migration; restore from tarball only for rollback.
-
-## Monitoring Architecture
-
-Monitoring is profile-based and isolated from public ingress:
-
-- Prometheus scrapes:
-  - `prometheus:9090`
-  - `embedding-api:8000/metrics`
-  - `embedding-worker:8001/metrics`
-  - `go-prediction-api:8000/metrics`
-  - `trainer-api:8000/metrics` / `trainer-worker:8001/metrics` (when training profile is active)
-  - `redis-exporter:9121`
-- Grafana datasource is provisioned from `monitoring/grafana/provisioning/datasources/prometheus.yml`.
-- Dashboards are file-provisioned from `monitoring/grafana/dashboards`.
-- Metrics family includes:
-  - HTTP request/latency/in-flight metrics (`cafa5_http_*`)
-  - embedding/training Postgres queue depth and RQ queue length
-  - inference latency, validation failures, top_k distribution
-
-## Alert Rules
-
-Defined in `monitoring/alerts.yml`:
-
-- `Cafa5ServiceMetricsTargetDown`
-  - condition: `up == 0` for monitored jobs for >2m
-  - severity: `critical`
-- `Cafa5HighHttp5xxRatio`
-  - condition: service 5xx ratio >5% over 5m and enough traffic, sustained 10m
-  - severity: `warning`
-- `Cafa5EmbeddingQueueBacklogHigh`
-  - condition: queued embedding jobs >20 for 10m
-  - severity: `warning`
-- `Cafa5EmbeddingWorkerDownWithBacklog`
-  - condition: embedding worker down while RQ queue non-empty for 5m
-  - severity: `critical`
-- `Cafa5RedisDown`
-  - condition: `redis_up == 0` for 2m
-  - severity: `critical`
-
-Verify:
+### 2. Start the core stack
 
 ```bash
-curl -s http://localhost:9090/-/ready
-curl -s http://localhost:9090/api/v1/rules
-curl -s http://localhost:9090/api/v1/alerts
+make up
 ```
 
-## APIs and Route Map
+`make up` uses the portable base compose file and **adds** `docker-compose.gpu.yml` when `nvidia-smi` is available. On CPU-only hosts, inference uses `CAFA_DEVICE=auto` → CPU.
 
-All gateway examples below use TLS and basic auth.
+Default services: `nginx`, `embedding-api`, `embedding-worker`, `go-prediction-api`, `streamlit-ui`, `mlflow`, `postgres`, `redis`, `minio` (plus backup sidecars outside CI).
 
-- Embedding API (admin): `/api/v1/...`
-  - `/api/v1/health`
-  - `/api/v1/jobs`
-  - `/api/v1/jobs/fasta`
-  - `/api/v1/jobs/{job_id}`
-  - `/api/v1/jobs/{job_id}/artifacts/{name}`
-  - `/api/v1/jobs/{job_id}/predict-go`
-  - `/api/v1/predict-go-from-sequences`
-  - `/api/v1/predict-go-from-fasta`
-- GO prediction API (user/admin): `/api/predict/...`
-  - `/api/predict/health`
-  - `/api/predict/predict`
-- Training API (admin, training profile): `/api/train/...`
-  - `/api/train/health`
-  - `/api/train/train`
-  - `/api/train/jobs/{job_id}`
-
-## Practical Testing Playbook
-
-### 1) Health checks
+### 3. Optional profiles
 
 ```bash
-curl -sk -u USER:PASS https://localhost/api/v1/health
-curl -sk -u USER:PASS https://localhost/api/predict/health
-curl -sk -u USER:PASS https://localhost/api/train/health
+make monitoring-up   # Prometheus + Grafana
+make training-up     # Training API + worker
+make all-up          # default + monitoring + training
 ```
 
-### 2) Async embeddings from sequences
+### 4. Access points
+
+| Endpoint | URL |
+|----------|-----|
+| Gateway | `http://localhost` |
+| Streamlit UI | `http://localhost/ui/` |
+| MLflow | `http://localhost/mlflow/` |
+| Prometheus | `http://localhost:9090` |
+| Grafana | `http://localhost:3000` |
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS -X POST https://localhost/api/v1/jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "stage": "test",
-    "backend": "esm2",
-    "pooling": "mean",
-    "batch_size": 2,
-    "max_length": 1280,
-    "sequences": [
-      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
-      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
-    ]
-  }'
+curl -sk -u admin:PASSWORD http://localhost/api/v1/health
+curl -sk -u user:PASSWORD http://localhost/api/predict/health
 ```
 
-Poll job and download artifacts:
+### 5. CI / CPU smoke
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS https://localhost/api/v1/jobs/<JOB_ID>
-curl -sk -u ADMIN:ADMIN_PASS -o test_ids.npy \
-  https://localhost/api/v1/jobs/<JOB_ID>/artifacts/test_ids.npy
-curl -sk -u ADMIN:ADMIN_PASS -o test_embeddings.npy \
-  https://localhost/api/v1/jobs/<JOB_ID>/artifacts/test_embeddings.npy
+make ci-up
+make smoke
+make ci-down
 ```
 
-### 3) Direct embedding -> GO inference
+**Full deploy guide:** [docs/deployment.md](docs/deployment.md)
 
-```bash
-python - <<'PY'
-import json
-import numpy as np
-import requests
+## Configuration
 
-embedding = np.load("test_embeddings.npy")[0].astype(float).tolist()
-r = requests.post(
-    "https://localhost/api/predict/predict",
-    auth=("USER", "USER_PASS"),
-    json={"embedding": embedding, "top_k": 10},
-    verify=False,
-    timeout=60,
-)
-print(r.status_code)
-print(json.dumps(r.json(), indent=2))
-PY
+| Group | Variables (see [`.env.example`](.env.example)) |
+|-------|--------------------------------------------------|
+| Gateway auth | `GATEWAY_ADMIN_*`, `GATEWAY_USER_*` |
+| Postgres | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` |
+| Jobs DB | `JOBS_DATABASE_URL` |
+| Redis / RQ | `REDIS_URL`, `EMBEDDING_JOB_TIMEOUT_SEC`, `TRAINING_JOB_TIMEOUT_SEC` |
+| MinIO / S3 | `MINIO_*`, `AWS_*`, `MLFLOW_S3_ENDPOINT_URL`, `MLFLOW_ARTIFACT_ROOT` |
+| Registry | `REGISTERED_MODEL_NAME`, `PROMOTION_THRESHOLD` |
+
+Pipeline hyperparameters live in [`configs/config.yaml`](configs/config.yaml). Keep `embedding.backend` aligned with training embeddings and the GO predictor’s expected dimension.
+
+## Training workflow
+
+```text
+preprocess → split → embed → train → evaluate_holdout → promote_model
 ```
 
-### 4) Sequence -> GO in one call (main integration endpoints)
+| Mode | When to use |
+|------|-------------|
+| CLI (`scripts/retrain_pipeline.py`) | Research iteration, full control |
+| Training API (`/api/train/train`) | Ops automation (training profile) |
+| Hybrid | Embed via API; train/promote via CLI |
 
-Two sync wrappers share the same response contract (`PredictGoResponse`): embed → wait for job completion → call GO prediction API per sequence.
+Primary promotion metric: `holdout_f1_micro` (default threshold `0.35`). Serving consumes the `champion` alias unless `MODEL_URI` is overridden.
 
-#### Option A: JSON sequences
+**Details:** [docs/training.md](docs/training.md)
 
-Endpoint: `POST /api/v1/predict-go-from-sequences`
+## Serving and UI
 
-Request contract:
+| Path | Purpose | Auth tier |
+|------|---------|-----------|
+| `/ui/` | Streamlit product UI | gateway |
+| `/api/predict/*` | Embedding → GO | user / admin |
+| `/api/v1/predict-go-from-sequences` | Sequence → GO (JSON) | user / admin |
+| `/api/v1/predict-go-from-fasta` | Sequence → GO (FASTA) | user / admin |
+| `/api/v1/jobs*` | Async embedding jobs | admin |
+| `/api/train*` | Async train / retrain | admin (training profile) |
+| `/mlflow/*` | Tracking + registry UI | admin |
 
-- `backend`: `esm2 | protbert | t5`
-- `pooling`: `mean | cls`
-- `batch_size`: `1..128`
-- `max_length`: `8..8192`
-- `top_k`: `1..500`
-- `sequences`: non-empty list of `{id, sequence}`
-- optional:
-  - `indices`: subset prediction indices
-  - `fail_fast`: `true|false`
-  - `timeout_seconds`: `5..7200` (default `1800`)
-  - `poll_interval_seconds`: `0.1..5.0` (default `1.0`)
-
-Example:
+Example (sequence → GO):
 
 ```bash
-curl -sk -u USER:USER_PASS -X POST \
-  https://localhost/api/v1/predict-go-from-sequences \
+curl -sk -u user:PASSWORD -X POST \
+  http://localhost/api/v1/predict-go-from-sequences \
   -H "Content-Type: application/json" \
   -d '{
     "backend": "esm2",
@@ -375,177 +238,113 @@ curl -sk -u USER:USER_PASS -X POST \
     "batch_size": 2,
     "max_length": 1280,
     "top_k": 10,
-    "fail_fast": true,
     "sequences": [
-      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"},
-      {"id": "P2", "sequence": "GAVLIPFYWSTCMNQDEKRH"}
+      {"id": "P1", "sequence": "MKTAYIAKQRQISFVKSHFSRQ"}
     ]
   }'
 ```
 
-#### Option B: FASTA upload
+Service-specific notes:
 
-Endpoint: `POST /api/v1/predict-go-from-fasta` (`multipart/form-data`)
+- [services/embedding-api/README.md](services/embedding-api/README.md)
+- [services/training-api/README.md](services/training-api/README.md)
+- [services/streamlit-ui/README.md](services/streamlit-ui/README.md)
 
-Form fields mirror the JSON endpoint (`backend`, `pooling`, `batch_size`, `max_length`, `top_k`, `fail_fast`, `timeout_seconds`, `poll_interval_seconds`) plus required `fasta_file`. There is no `indices` form field — all parsed records are predicted. `sequence_id` in results is the first token after `>` in each FASTA header.
-
-Example:
-
-```bash
-curl -sk -u USER:USER_PASS -X POST \
-  https://localhost/api/v1/predict-go-from-fasta \
-  -F "fasta_file=@examples/small_sequences.fasta" \
-  -F "backend=esm2" \
-  -F "pooling=mean" \
-  -F "batch_size=2" \
-  -F "max_length=1280" \
-  -F "top_k=10" \
-  -F "fail_fast=true"
-```
-
-**Residue normalization (both endpoints):** Sequences are normalized at embedding time: uppercase, whitespace stripped, canonical amino acids kept, and `X`/`U`/`O`/`B`/`Z`/`J` plus any other unknown symbols mapped to `X` (see `normalize_sequence` in `scripts/embed_sequences.py`).
-
-**Operational limits:**
-
-- FASTA upload cap: **5 MB** (API + NGINX on `/api/v1/predict-go-from-fasta`). Larger uploads return `413` (`FASTA_FILE_TOO_LARGE`).
-- No sequence-count cap on the FASTA endpoint — only file size. Dense FASTA files may still time out because GO inference is sequential.
-- Default sync timeout: **1800 s** (embedding wait + per-sequence GO calls).
-- Large or proteome-scale jobs: `POST /api/v1/jobs/fasta` → poll → `POST /api/v1/jobs/{job_id}/predict-go`.
-
-What happens internally:
-
-1. `embedding-api` creates and runs an embedding job (from JSON sequences or parsed FASTA).
-2. It waits for completion with polling (`timeout_seconds`, `poll_interval_seconds`).
-3. It loads generated `test_embeddings.npy`.
-4. For each selected item, it calls `go-prediction-api /predict`.
-5. It returns aggregated predictions and per-item failures.
-
-Response shape (simplified):
-
-```json
-{
-  "job_id": "uuid",
-  "status": "succeeded",
-  "model_version": "12",
-  "top_k": 10,
-  "results": [
-    {
-      "index": 0,
-      "sequence_id": "P1",
-      "predictions": [{"go_term": "GO:0000000", "score": 0.82}]
-    }
-  ],
-  "failures": []
-}
-```
-
-### 5) Trigger retraining via API
+## Monitoring and operations
 
 ```bash
-curl -sk -u ADMIN:ADMIN_PASS -X POST https://localhost/api/train/train \
-  -H "Content-Type: application/json" \
-  -d '{"config":"configs/config.yaml","mode":"retrain"}'
-```
-
-Poll:
-
-```bash
-curl -sk -u ADMIN:ADMIN_PASS https://localhost/api/train/jobs/<JOB_ID>
-```
-
-## Retraining Workflow Options
-
-### Option A: Pure CLI retraining (recommended for research iteration)
-
-```bash
-python scripts/retrain_pipeline.py --config configs/config.yaml \
-  --promotion-threshold 0.35 \
-  --model-name cafa-go-model
-```
-
-### Option B: API-driven retraining (recommended for ops automation)
-
-- Start `training` profile.
-- Submit `/api/train/train` with mode `retrain`.
-- Poll until completion.
-- Use MLflow links in final job payload for audit and model version traceability.
-
-### Option C: Hybrid flow
-
-- Generate embeddings in service mode (`/api/v1/jobs`) for online or ad-hoc data.
-- Train/evaluate in CLI for maximum flexibility.
-- Promote registry alias after metric gates.
-
-## Different Ways to Implement/Deploy This Project
-
-### 1) Monolith-like local stack (current default)
-
-- One compose file, one host, local volumes.
-- Best for development and reproducible demos.
-
-### 2) API-first deployment
-
-- Keep `nginx + embedding-api + go-prediction-api + mlflow`.
-- Add `training-api` only in restricted environments.
-- Good for production inference where retraining is decoupled.
-
-### 3) Training separated from serving
-
-- Run training pipeline on dedicated compute (GPU/HPC/batch scheduler).
-- Push selected model versions to shared MLflow registry.
-- Serving stack only consumes `@champion` alias.
-
-### 4) Monitoring-hardened setup
-
-- Enable monitoring profile by default.
-- Add Alertmanager and external notification integrations.
-- Formalize SLOs around 5xx ratio, p95 latency, and queue backlog.
-
-## Reproducibility and QC Recommendations
-
-- Keep `embedding.backend` and trained model embedding dimension aligned to avoid invalid inference inputs.
-- Use deterministic seeds and fixed splits for comparable retrains.
-- Monitor class imbalance and threshold sensitivity (multi-label GO bias risk).
-- Track data snapshot/version metadata in MLflow to prevent annotation drift confusion.
-- Watch inference validation failure reasons for upstream schema drift.
-
-## Useful Make Targets
-
-```bash
-make up              # Default stack (GPU overlay if NVIDIA detected)
-make down
-make ci-up           # CPU CI/smoke stack (base + ci overlay)
-make ci-down         # Stop CI stack and remove volumes
-make training-up
-make training-down
 make monitoring-up
-make monitoring-down
-make lint            # Ruff on src/ services/ scripts/
-make test            # Unit tests (tests/unit)
-make build-images    # Build all five product images
-make pull-images     # Pull product images from GHCR (GHCR_TAG=main|sha-...)
-make smoke           # Smoke scripts (Compose stack must already be up)
-make ci-env          # Copy .env.example → .env if missing
-make gateway-auth    # Write nginx/.htpasswd-* from GATEWAY_* in .env
 ```
 
-## CI (GitHub Actions)
+| Signal | Why it matters |
+|--------|----------------|
+| Target `up` | Service scrape health |
+| HTTP 5xx ratio / latency | Serving quality |
+| Embedding / training queue depth | Backlog and worker health |
+| Inference validation failures | Embedding dimension / schema drift |
+| `redis_up` | Job dispatch dependency |
 
-PR and `main` pushes run **lint**, **unit tests**, and **parallel image builds**. Merges to `main` also **publish to GHCR** (`sha-<fullsha>` + `main`). See [`.github/CI.md`](.github/CI.md).
+Alert rules live in `monitoring/alerts.yml` (service down, high 5xx, queue backlog, worker-down-with-backlog, Redis down).
 
-- Registry: **GHCR** (`ghcr.io/behroooz/proseqgo-*`)
-- Compose: portable **base** + **`docker-compose.ci.yml`** for CPU smoke (`make ci-up`)
-- GPU local dev: **base** + **`docker-compose.gpu.yml`** (`make up` auto-detects NVIDIA)
-- CI does **not** run training/GPU/retrain jobs
-- Compose secrets: `.env` from `.env.example`; gateway Basic Auth via `make gateway-auth` (`GATEWAY_ADMIN_*` ≠ `GATEWAY_USER_*`)
-- Local image rebuild: `make build-images`; pull published: `make pull-images`
+**Details:** [docs/monitoring.md](docs/monitoring.md) · [monitoring/README.md](monitoring/README.md)
 
-## Service-Specific Documentation
+## Testing and CI
 
-- `services/embedding-api/README.md`
-- `services/training-api/README.md`
-- `services/streamlit-ui/README.md`
-- `monitoring/README.md`
+| Check | Command | Notes |
+|-------|---------|-------|
+| Lint | `make lint` | Ruff on `src/`, `services/`, `scripts/` |
+| Unit tests | `make test` | `tests/unit` — no Docker/GPU/network |
+| Smoke | `make smoke` | Compose stack must already be up |
+| Images | `make build-images` / `make pull-images` | Local build or GHCR pull |
+
+GitHub Actions (PR / `main`): lint → unit tests → parallel image builds. Merges to `main` publish to GHCR (`sha-<fullsha>` + `main`). See [`.github/CI.md`](.github/CI.md).
+
+CI does **not** run GPU training or full retrain jobs.
+
+## Deployment
+
+| Environment | Compose | Typical use |
+|-------------|---------|-------------|
+| Local CPU | `docker-compose.yml` | Dev without NVIDIA |
+| Local GPU | base + `docker-compose.gpu.yml` | `make up` auto-detects |
+| CI / smoke | base + `docker-compose.ci.yml` | `make ci-up` |
+| Full stack | base (+ GPU) + `training` + `monitoring` | Integration / demos |
+
+Suggested production posture: keep NGINX + inference + MLflow always on; run training on dedicated compute; promote only via metric gates; enable monitoring by default.
+
+**Details:** [docs/deployment.md](docs/deployment.md)
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [docs/architecture.md](docs/architecture.md) | Services, flows, security boundaries |
+| [docs/data.md](docs/data.md) | Kaggle source, layout, checksums, versioning |
+| [docs/training.md](docs/training.md) | Pipeline, metrics, promotion, MLflow |
+| [docs/deployment.md](docs/deployment.md) | Environments, secrets, Compose, GHCR |
+| [docs/monitoring.md](docs/monitoring.md) | Metrics, alerts, operational response |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Symptom → cause → fix |
+| [docs/contributing.md](docs/contributing.md) | Dev setup, PR workflow, standards |
+
+## Contributing
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+make lint && make test
+```
+
+Prefer small, reviewable PRs. Discuss design first for public API contract changes, registry/alias strategy, new heavy dependencies, jobs DB schema, or security model changes.
+
+**Details:** [docs/contributing.md](docs/contributing.md)
+
+## Troubleshooting
+
+Start here when something fails:
+
+```bash
+docker compose ps
+docker compose logs --tail=100 <service>
+curl -s http://localhost:9090/-/ready
+curl -sk -u admin:PASS http://localhost/api/v1/health
+```
+
+Common issues covered in the runbook: missing `.env` / htpasswd, `proseqgo_jobs` DB, gateway 401/502, GPU not visible, MLflow / MinIO artifact errors, embedding–model dimension mismatch, queue backlog.
+
+**Details:** [docs/troubleshooting.md](docs/troubleshooting.md)
+
+## Useful Make targets
+
+```bash
+make up / make down
+make ci-up / make ci-down
+make training-up / make training-down
+make monitoring-up / make monitoring-down
+make all-up / make all-down
+make lint / make test / make smoke
+make build-images / make pull-images
+make ci-env / make gateway-auth
+```
 
 ## License
 
