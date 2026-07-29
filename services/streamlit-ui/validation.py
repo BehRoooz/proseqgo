@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
 MAX_FASTA_UPLOAD_BYTES = 5 * 1024 * 1024  # must match embedding-api config + nginx route
+
+
+@dataclass(frozen=True)
+class GatewayConfig:
+    base_url: str
+    username: str
+    password: str
+    verify_tls: bool
 
 
 def normalize_sequence(raw_sequence: str) -> str:
@@ -42,9 +51,48 @@ def validate_fasta_upload(file_bytes: bytes, filename: str) -> tuple[bool, str]:
     return True, ""
 
 
-def validate_gateway_auth(gateway_base_url: str, username: str, password: str) -> str | None:
-    if not gateway_base_url.strip():
-        return "Gateway base URL is required."
-    if not username.strip() or not password:
-        return "Both API username and password are required."
-    return None
+def parse_verify_tls(raw: str | None, *, base_url: str) -> bool:
+    """Parse GATEWAY_VERIFY_TLS; default from URL scheme when unset/empty."""
+    if raw is None or not str(raw).strip():
+        return base_url.startswith("https://")
+    value = str(raw).strip().lower()
+    if value in ("1", "true", "yes", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(
+        "GATEWAY_VERIFY_TLS must be true/false (or 1/0, yes/no, on/off)."
+    )
+
+
+def load_gateway_config(
+    *,
+    base_url: str | None,
+    username: str | None,
+    password: str | None,
+    verify_tls: str | None = None,
+) -> tuple[GatewayConfig | None, str | None]:
+    """Build gateway config from service env values (not user form input)."""
+    cleaned_url = (base_url or "").strip()
+    cleaned_user = (username or "").strip()
+    cleaned_password = password or ""
+
+    if not cleaned_url:
+        return None, "GATEWAY_BASE_URL is required."
+    if not cleaned_user or not cleaned_password:
+        return None, "GATEWAY_USER and GATEWAY_USER_PASSWORD are required."
+
+    try:
+        tls = parse_verify_tls(verify_tls, base_url=cleaned_url)
+    except ValueError as exc:
+        return None, str(exc)
+
+    return (
+        GatewayConfig(
+            base_url=cleaned_url.rstrip("/"),
+            username=cleaned_user,
+            password=cleaned_password,
+            verify_tls=tls,
+        ),
+        None,
+    )
