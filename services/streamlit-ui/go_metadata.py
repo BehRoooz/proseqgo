@@ -22,7 +22,7 @@ DEFAULT_GO_TERM_METADATA_CSV = (
     REPO_ROOT
     / "services"
     / "streamlit-ui"
-    / "data"
+    / "metadata"
     / "go_term_metadata.csv"
 )
 

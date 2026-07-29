@@ -103,7 +103,7 @@ def main():
     parser.add_argument(
         "--output-file", 
         type=str, 
-        default="services/streamlit-ui/data/go_term_metadata.csv", 
+        default="services/streamlit-ui/metadata/go_term_metadata.csv", 
         help="Path to the output file")
     args = parser.parse_args()
     
