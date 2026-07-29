@@ -321,6 +321,8 @@ services:
       # Predict-route credentials (public user). Must match make gateway-auth / .htpasswd-user.
       GATEWAY_USER: ${GATEWAY_USER:-user}
       GATEWAY_USER_PASSWORD: ${GATEWAY_USER_PASSWORD:-change-me-gateway-user}
+      # Compose uses plain HTTP to nginx; disable TLS verification explicitly.
+      GATEWAY_VERIFY_TLS: "false"
     depends_on:
       - embedding-api
       - go-prediction-api

@@ -1,28 +1,24 @@
 # Streamlit UI Service
 
-This service provides a lightweight web UI for sequence-to-GO prediction in the CAFA-5 stack.
+This service provides a lightweight web UI for ProSeqGO (Protein Sequence Gene Ontology prediction platform).
 
 ## What Was Implemented
 
 The Streamlit app in `services/streamlit-ui/app.py` includes:
 
-- Project header and description for the CAFA-5 MLOps solution.
-- Quick links to:
-  - MLflow: `https://127.0.0.1/mlflow/`
-  - Prometheus: `http://127.0.0.1:9090`
-  - Grafana: `http://127.0.0.1:3000`
-- Workflow visualization rendered via Graphviz (`st.graphviz_chart`).
+- Project header and description for ProSeqGO sequence-to-GO inference.
 - Prediction form with:
-  - protein sequence input,
-  - `top_k` input (`1..500`),
-  - gateway base URL input (defaults from `GATEWAY_BASE_URL` env var),
-  - API username/password fields (defaults from `GATEWAY_USER` / `GATEWAY_USER_PASSWORD`),
-  - optional TLS verification toggle.
+  - protein sequence input or FASTA upload,
+  - `top_k` input (`1..500`).
+- Gateway connection is injected from service environment only (not shown in the form):
+  - `GATEWAY_BASE_URL`
+  - `GATEWAY_USER` / `GATEWAY_USER_PASSWORD`
+  - optional `GATEWAY_VERIFY_TLS` (`true`/`false`; defaults from URL scheme when unset)
 - Input QC and validation:
   - trims whitespace/newlines from sequence,
   - uppercases sequence,
   - validates against amino-acid alphabet `ACDEFGHIKLMNPQRSTVWY`,
-  - checks required credentials and gateway URL.
+  - fails fast if gateway env config is missing.
 - Prediction call to:
   - `POST /api/v1/predict-go-from-sequences`
 - Request payload contract used by UI:
@@ -68,10 +64,12 @@ The service container is defined in `docker/docker_streamlit/Dockerfile.streamli
 - Build context and dockerfile:
   - `context: .`
   - `dockerfile: docker/docker_streamlit/Dockerfile.streamlit`
-- Image name: `cafa5-streamlit-ui:local`
-- Network: `cafa5`
+- Image name: `proseqgo-streamlit-ui:local`
+- Network: `proseqgo`
 - Environment:
-  - `GATEWAY_BASE_URL: https://nginx`
+  - `GATEWAY_BASE_URL: http://nginx`
+  - `GATEWAY_USER` / `GATEWAY_USER_PASSWORD` (from `.env`)
+  - `GATEWAY_VERIFY_TLS: "false"`
 - Dependencies:
   - `embedding-api`
   - `go-prediction-api`
@@ -99,9 +97,9 @@ The service container is defined in `docker/docker_streamlit/Dockerfile.streamli
 Important auth boundary:
 
 - Streamlit UI path itself is public (`/ui/`).
-- Prediction endpoint `/api/v1/predict-go-from-sequences` still uses NGINX basic auth (`.htpasswd-user`).
-- Defaults come from `.env` via Compose (`GATEWAY_USER` / `GATEWAY_USER_PASSWORD`). Run `make gateway-auth` so htpasswd matches.
-- Admin credentials (`GATEWAY_ADMIN_*`) are for `/mlflow` and admin `/api/v1` routes — not the public UI defaults.
+- Prediction endpoints still use NGINX basic auth (`.htpasswd-user`).
+- The UI injects `GATEWAY_USER` / `GATEWAY_USER_PASSWORD` from the service environment (Compose / `.env`); users never enter credentials in the form. Run `make gateway-auth` so htpasswd matches.
+- Admin credentials (`GATEWAY_ADMIN_*`) are for `/mlflow` and admin `/api/v1` routes — not used by the Streamlit UI.
 
 ## Run And Access
 
@@ -127,8 +125,10 @@ Validation done for this integration included:
 
 ## Troubleshooting
 
-- `Connection refused` from Streamlit to `127.0.0.1:443`:
-  - in-container localhost is not NGINX; use `GATEWAY_BASE_URL=https://nginx`.
+- `Connection refused` from Streamlit to `127.0.0.1`:
+  - in-container localhost is not NGINX; set `GATEWAY_BASE_URL=http://nginx` on the `streamlit-ui` service.
+- Misconfigured UI error about missing gateway env:
+  - ensure `GATEWAY_BASE_URL`, `GATEWAY_USER`, and `GATEWAY_USER_PASSWORD` are set for `streamlit-ui`.
 - `502 Bad Gateway` for `/ui/*`:
   - can happen with stale upstream resolution if upstream is hardcoded;
   - current config uses runtime DNS with variable upstream.
