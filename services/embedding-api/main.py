@@ -16,9 +16,16 @@ from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, ge
 from config import (
     API_PREFIX,
     ARTIFACT_ROOT,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_LENGTH,
     GO_PREDICTION_API_URL,
     JOBS_DATABASE_URL,
     MAX_FASTA_UPLOAD_BYTES,
+    MAX_FASTA_UPLOAD_MB,
+    MAX_SEQUENCE_LENGTH_AA,
+    MAX_SEQUENCES_PER_REQUEST,
+    SYNC_PREDICT_POLL_INTERVAL_SEC,
+    SYNC_PREDICT_TIMEOUT_SEC,
 )
 from job_store import JobStore
 from queueing import enqueue_embedding_job, get_queue
@@ -161,12 +168,33 @@ def metrics() -> Response:
     return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
 
 
+def _enforce_sequence_envelope(sequences: list[str]) -> None:
+    """Reject requests that exceed MVP count / AA-length caps from env."""
+    if len(sequences) > MAX_SEQUENCES_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"TOO_MANY_SEQUENCES: max {MAX_SEQUENCES_PER_REQUEST}, "
+                f"got {len(sequences)}"
+            ),
+        )
+    for index, sequence in enumerate(sequences):
+        aa_len = len("".join(sequence.split()))
+        if aa_len > MAX_SEQUENCE_LENGTH_AA:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"SEQUENCE_TOO_LONG: index={index} length={aa_len} "
+                    f"max={MAX_SEQUENCE_LENGTH_AA}"
+                ),
+            )
+
+
 @app.post(API_PREFIX + "/jobs", response_model=CreateJobResponse, status_code=202)
 def create_job(request: CreateJobRequest) -> CreateJobResponse:
-    _observe_sequence_lengths(
-        backend=request.backend,
-        sequences=[seq.sequence for seq in request.sequences],
-    )
+    sequences = [seq.sequence for seq in request.sequences]
+    _enforce_sequence_envelope(sequences)
+    _observe_sequence_lengths(backend=request.backend, sequences=sequences)
     job_id = str(uuid.uuid4())
     _create_and_enqueue(job_id, request.model_dump())
     return CreateJobResponse(
@@ -181,16 +209,15 @@ async def create_fasta_job(
     fasta_file: UploadFile = File(...),
     backend: Literal["esm2", "protbert", "t5"] = Form(default="esm2"),
     pooling: Literal["mean", "cls"] = Form(default="mean"),
-    batch_size: int = Form(default=8),
-    max_length: int = Form(default=1280),
+    batch_size: int = Form(default=DEFAULT_BATCH_SIZE),
+    max_length: int = Form(default=DEFAULT_MAX_LENGTH),
 ) -> CreateJobResponse:
-    fasta_text = (await fasta_file.read()).decode("utf-8", errors="replace")
-    if not fasta_text.strip():
-        raise HTTPException(status_code=400, detail="Uploaded FASTA is empty.")
+    fasta_text = await _read_fasta_upload(fasta_file)
     try:
         _, sequences = parse_fasta_text(fasta_text)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    _enforce_sequence_envelope(sequences)
     _observe_sequence_lengths(backend=backend, sequences=sequences)
 
     job_id = str(uuid.uuid4())
@@ -362,6 +389,7 @@ def _parse_and_validate_fasta(fasta_text: str, backend: str) -> None:
             status_code=400,
             detail=f"FASTA records with empty sequences: {preview}{suffix}",
         )
+    _enforce_sequence_envelope(sequences)
     _observe_sequence_lengths(backend=backend, sequences=sequences)
 
 
@@ -379,8 +407,13 @@ def _validate_predict_form_params(
         raise HTTPException(status_code=400, detail="max_length must be between 8 and 8192")
     if not 1 <= top_k <= 500:
         raise HTTPException(status_code=400, detail="top_k must be between 1 and 500")
-    if not 5 <= timeout_seconds <= 7200:
-        raise HTTPException(status_code=400, detail="timeout_seconds must be between 5 and 7200")
+    if not 5 <= timeout_seconds <= SYNC_PREDICT_TIMEOUT_SEC:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"timeout_seconds must be between 5 and {SYNC_PREDICT_TIMEOUT_SEC}"
+            ),
+        )
     if not 0.1 < poll_interval_seconds <= 5.0:
         raise HTTPException(
             status_code=400,
@@ -391,10 +424,9 @@ def _validate_predict_form_params(
 async def _read_fasta_upload(fasta_file: UploadFile) -> str:
     raw = await fasta_file.read(MAX_FASTA_UPLOAD_BYTES + 1)
     if len(raw) > MAX_FASTA_UPLOAD_BYTES:
-        max_mb = MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)
         raise HTTPException(
             status_code=413,
-            detail=f"FASTA_FILE_TOO_LARGE: max {max_mb} MB",
+            detail=f"FASTA_FILE_TOO_LARGE: max {MAX_FASTA_UPLOAD_MB} MB",
         )
     fasta_text = raw.decode("utf-8", errors="replace")
     if not fasta_text.strip():
@@ -441,10 +473,14 @@ def _wait_for_job_completion(job_id: str, timeout_seconds: int, poll_interval_se
 
 @app.post(API_PREFIX + "/predict-go-from-sequences", response_model=PredictGoResponse)
 def predict_go_from_sequences(request: PredictGoFromSequencesRequest) -> PredictGoResponse:
-    _observe_sequence_lengths(
-        backend=request.backend,
-        sequences=[seq.sequence for seq in request.sequences],
-    )
+    sequences = [seq.sequence for seq in request.sequences]
+    _enforce_sequence_envelope(sequences)
+    if request.timeout_seconds > SYNC_PREDICT_TIMEOUT_SEC:
+        raise HTTPException(
+            status_code=400,
+            detail=f"timeout_seconds must be <= {SYNC_PREDICT_TIMEOUT_SEC}",
+        )
+    _observe_sequence_lengths(backend=request.backend, sequences=sequences)
     job_payload = {
         "stage": "test",
         "backend": request.backend,
@@ -468,12 +504,12 @@ async def predict_go_from_fasta(
     fasta_file: UploadFile = File(...),
     backend: Literal["esm2", "protbert", "t5"] = Form(default="esm2"),
     pooling: Literal["mean", "cls"] = Form(default="mean"),
-    batch_size: int = Form(default=8),
-    max_length: int = Form(default=1280),
+    batch_size: int = Form(default=DEFAULT_BATCH_SIZE),
+    max_length: int = Form(default=DEFAULT_MAX_LENGTH),
     top_k: int = Form(default=10),
     fail_fast: bool = Form(default=True),
-    timeout_seconds: int = Form(default=1800),
-    poll_interval_seconds: float = Form(default=1.0),
+    timeout_seconds: int = Form(default=SYNC_PREDICT_TIMEOUT_SEC),
+    poll_interval_seconds: float = Form(default=SYNC_PREDICT_POLL_INTERVAL_SEC),
 ) -> PredictGoResponse:
     _validate_predict_form_params(
         batch_size=batch_size,

@@ -4,6 +4,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from config import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_MAX_LENGTH,
+    MAX_SEQUENCES_PER_REQUEST,
+    SYNC_PREDICT_POLL_INTERVAL_SEC,
+    SYNC_PREDICT_TIMEOUT_SEC,
+)
+
 
 class SequenceItem(BaseModel):
     id: str = Field(min_length=1)
@@ -14,9 +22,9 @@ class CreateJobRequest(BaseModel):
     stage: Literal["test"] = "test"
     backend: Literal["esm2", "protbert", "t5"] = "esm2"
     pooling: Literal["mean", "cls"] = "mean"
-    batch_size: int = Field(default=8, ge=1, le=128)
-    max_length: int = Field(default=1280, ge=8, le=8192)
-    sequences: list[SequenceItem] = Field(min_length=1)
+    batch_size: int = Field(default=DEFAULT_BATCH_SIZE, ge=1, le=128)
+    max_length: int = Field(default=DEFAULT_MAX_LENGTH, ge=8, le=8192)
+    sequences: list[SequenceItem] = Field(min_length=1, max_length=MAX_SEQUENCES_PER_REQUEST)
 
 
 class Progress(BaseModel):
@@ -78,11 +86,19 @@ class PredictGoResponse(BaseModel):
 class PredictGoFromSequencesRequest(BaseModel):
     backend: Literal["esm2", "protbert", "t5"] = "esm2"
     pooling: Literal["mean", "cls"] = "mean"
-    batch_size: int = Field(default=8, ge=1, le=128)
-    max_length: int = Field(default=1280, ge=8, le=8192)
-    sequences: list[SequenceItem] = Field(min_length=1)
+    batch_size: int = Field(default=DEFAULT_BATCH_SIZE, ge=1, le=128)
+    max_length: int = Field(default=DEFAULT_MAX_LENGTH, ge=8, le=8192)
+    sequences: list[SequenceItem] = Field(min_length=1, max_length=MAX_SEQUENCES_PER_REQUEST)
     top_k: int = Field(default=10, ge=1, le=500)
     indices: list[int] | None = None
     fail_fast: bool = True
-    timeout_seconds: int = Field(default=1800, ge=5, le=7200)
-    poll_interval_seconds: float = Field(default=1.0, gt=0.1, le=5.0)
+    timeout_seconds: int = Field(
+        default=SYNC_PREDICT_TIMEOUT_SEC,
+        ge=5,
+        le=SYNC_PREDICT_TIMEOUT_SEC,
+    )
+    poll_interval_seconds: float = Field(
+        default=SYNC_PREDICT_POLL_INTERVAL_SEC,
+        gt=0.1,
+        le=5.0,
+    )
