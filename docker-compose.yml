@@ -245,6 +245,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       EMBEDDING_JOB_TIMEOUT_SEC: ${EMBEDDING_JOB_TIMEOUT_SEC:-3600}
       EMBEDDING_ARTIFACT_ROOT: /app/outputs/service_artifacts
+      MAX_SEQUENCES_PER_REQUEST: ${MAX_SEQUENCES_PER_REQUEST:-20}
+      MAX_SEQUENCE_LENGTH_AA: ${MAX_SEQUENCE_LENGTH_AA:-1000}
+      MAX_FASTA_UPLOAD_MB: ${MAX_FASTA_UPLOAD_MB:-2}
+      SYNC_PREDICT_TIMEOUT_SEC: ${SYNC_PREDICT_TIMEOUT_SEC:-600}
+      SYNC_PREDICT_POLL_INTERVAL_SEC: ${SYNC_PREDICT_POLL_INTERVAL_SEC:-1.0}
     depends_on:
       go-prediction-api:
         condition: service_started
@@ -323,6 +328,10 @@ services:
       GATEWAY_USER_PASSWORD: ${GATEWAY_USER_PASSWORD:-change-me-gateway-user}
       # Compose uses plain HTTP to nginx; disable TLS verification explicitly.
       GATEWAY_VERIFY_TLS: "false"
+      MAX_SEQUENCES_PER_REQUEST: ${MAX_SEQUENCES_PER_REQUEST:-20}
+      MAX_SEQUENCE_LENGTH_AA: ${MAX_SEQUENCE_LENGTH_AA:-1000}
+      MAX_FASTA_UPLOAD_MB: ${MAX_FASTA_UPLOAD_MB:-2}
+      SYNC_PREDICT_TIMEOUT_SEC: ${SYNC_PREDICT_TIMEOUT_SEC:-600}
     depends_on:
       - embedding-api
       - go-prediction-api

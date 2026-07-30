@@ -11,7 +11,10 @@ from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException
 
 from validation import (
-    MAX_FASTA_UPLOAD_BYTES,
+    MAX_FASTA_UPLOAD_MB,
+    MAX_SEQUENCE_LENGTH_AA,
+    MAX_SEQUENCES_PER_REQUEST,
+    SYNC_PREDICT_TIMEOUT_SEC,
     GatewayConfig,
     load_gateway_config,
     normalize_sequence,
@@ -32,8 +35,6 @@ PROJECT_DESCRIPTION = (
 PREDICT_SEQUENCES_ENDPOINT = "/api/v1/predict-go-from-sequences"
 PREDICT_FASTA_ENDPOINT = "/api/v1/predict-go-from-fasta"
 MAX_TOP_K = 500
-SEQUENCE_TIMEOUT_SECONDS = 600
-FASTA_TIMEOUT_SECONDS = 1800
 PREDICTION_MODE_SEQUENCE = "Prediction with sequence"
 PREDICTION_MODE_FASTA = "Prediction with FASTA"
 
@@ -55,8 +56,9 @@ def build_request_payload(sequence: str, top_k: int) -> dict[str, Any]:
         "backend": "esm2",
         "pooling": "mean",
         "batch_size": 1,
-        "max_length": 1280,
+        "max_length": MAX_SEQUENCE_LENGTH_AA,
         "top_k": top_k,
+        "timeout_seconds": SYNC_PREDICT_TIMEOUT_SEC,
         "sequences": [{"id": "input_1", "sequence": sequence}],
     }
 
@@ -103,7 +105,7 @@ def call_fasta_prediction_api(
         "backend": "esm2",
         "pooling": "mean",
         "batch_size": "8",
-        "max_length": "1280",
+        "max_length": str(MAX_SEQUENCE_LENGTH_AA),
         "top_k": str(top_k),
         "fail_fast": "true",
         "timeout_seconds": str(timeout_seconds),
@@ -231,7 +233,7 @@ def main() -> None:
                 gateway=gateway,
                 sequence=cleaned,
                 top_k=int(top_k),
-                timeout_seconds=SEQUENCE_TIMEOUT_SECONDS,
+                timeout_seconds=SYNC_PREDICT_TIMEOUT_SEC,
             )
     else:
         with st.form("predict_fasta_form"):
@@ -239,8 +241,9 @@ def main() -> None:
                 "Protein FASTA file",
                 type=["fasta", "fa", "txt"],
                 help=(
-                    f"Upload a UTF-8 FASTA file (max {MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)} MB). "
-                    "All records in the file are embedded and predicted. "
+                    f"Upload a UTF-8 FASTA file (max {MAX_FASTA_UPLOAD_MB} MB, "
+                    f"up to {MAX_SEQUENCES_PER_REQUEST} sequences, "
+                    f"each <= {MAX_SEQUENCE_LENGTH_AA} aa). "
                     "Non-canonical residues are normalized by the API at embedding time."
                 ),
             )
@@ -265,8 +268,9 @@ def main() -> None:
         )
         if record_count > 1:
             st.info(
-                f"This FASTA contains {record_count} sequences. "
-                "Large files may take several minutes to complete."
+                f"This FASTA contains {record_count} sequences "
+                f"(limit {MAX_SEQUENCES_PER_REQUEST}). "
+                "Larger files may take several minutes to complete."
             )
 
         with st.spinner(f"Submitting request to {PREDICT_FASTA_ENDPOINT} ..."):
@@ -275,7 +279,7 @@ def main() -> None:
                 file_bytes=file_bytes,
                 filename=fasta_file.name,
                 top_k=int(top_k),
-                timeout_seconds=FASTA_TIMEOUT_SECONDS,
+                timeout_seconds=SYNC_PREDICT_TIMEOUT_SEC,
             )
 
     if not ok:

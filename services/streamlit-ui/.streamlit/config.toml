@@ -1,3 +1,3 @@
 [server]
-# Align uploader caption + hard limit with API/nginx FASTA cap (5 MB).
-maxUploadSize = 5
+# Align uploader hard limit with MAX_FASTA_UPLOAD_MB (env / API / nginx).
+maxUploadSize = 2
