@@ -52,6 +52,21 @@ def test_validate_fasta_upload_too_large(ui_validation) -> None:
     assert "exceeds" in msg.lower()
 
 
+def test_validate_sequence_too_long(ui_validation) -> None:
+    too_long = "A" * (ui_validation.MAX_SEQUENCE_LENGTH_AA + 1)
+    ok, msg = ui_validation.validate_sequence(too_long)
+    assert ok is False
+    assert "exceeds" in msg.lower()
+
+
+def test_validate_fasta_too_many_sequences(ui_validation) -> None:
+    limit = ui_validation.MAX_SEQUENCES_PER_REQUEST
+    records = "\n".join(f">p{i}\nACDE" for i in range(limit + 1)).encode()
+    ok, msg = ui_validation.validate_fasta_upload(records, "many.fasta")
+    assert ok is False
+    assert "max allowed" in msg.lower()
+
+
 def test_load_gateway_config_ok(ui_validation) -> None:
     cfg, err = ui_validation.load_gateway_config(
         base_url="http://nginx/",

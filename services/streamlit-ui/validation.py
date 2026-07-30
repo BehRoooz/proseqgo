@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 
 AA_PATTERN = re.compile(r"^[ACDEFGHIKLMNPQRSTVWY]+$")
-MAX_FASTA_UPLOAD_BYTES = 5 * 1024 * 1024  # must match embedding-api config + nginx route
+
+MAX_SEQUENCES_PER_REQUEST = int(os.getenv("MAX_SEQUENCES_PER_REQUEST", "20"))
+MAX_SEQUENCE_LENGTH_AA = int(os.getenv("MAX_SEQUENCE_LENGTH_AA", "1000"))
+MAX_FASTA_UPLOAD_MB = int(os.getenv("MAX_FASTA_UPLOAD_MB", "2"))
+MAX_FASTA_UPLOAD_BYTES = MAX_FASTA_UPLOAD_MB * 1024 * 1024
+SYNC_PREDICT_TIMEOUT_SEC = int(os.getenv("SYNC_PREDICT_TIMEOUT_SEC", "600"))
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,11 @@ def normalize_sequence(raw_sequence: str) -> str:
 def validate_sequence(sequence: str) -> tuple[bool, str]:
     if not sequence:
         return False, "Sequence is empty after whitespace cleanup."
+    if len(sequence) > MAX_SEQUENCE_LENGTH_AA:
+        return (
+            False,
+            f"Sequence length {len(sequence)} exceeds the max of {MAX_SEQUENCE_LENGTH_AA} amino acids.",
+        )
     if not AA_PATTERN.fullmatch(sequence):
         return (
             False,
@@ -37,8 +48,7 @@ def validate_fasta_upload(file_bytes: bytes, filename: str) -> tuple[bool, str]:
     if not file_bytes:
         return False, "Uploaded FASTA file is empty."
     if len(file_bytes) > MAX_FASTA_UPLOAD_BYTES:
-        max_mb = MAX_FASTA_UPLOAD_BYTES // (1024 * 1024)
-        return False, f"FASTA file exceeds the {max_mb} MB upload limit."
+        return False, f"FASTA file exceeds the {MAX_FASTA_UPLOAD_MB} MB upload limit."
     try:
         fasta_text = file_bytes.decode("utf-8")
     except UnicodeDecodeError:
@@ -48,6 +58,11 @@ def validate_fasta_upload(file_bytes: bytes, filename: str) -> tuple[bool, str]:
     record_count = sum(1 for line in fasta_text.splitlines() if line.startswith(">"))
     if record_count == 0:
         return False, "FASTA file has no records (lines starting with '>')."
+    if record_count > MAX_SEQUENCES_PER_REQUEST:
+        return (
+            False,
+            f"FASTA has {record_count} sequences; max allowed is {MAX_SEQUENCES_PER_REQUEST}.",
+        )
     return True, ""
 
 
