@@ -68,16 +68,17 @@ make all-up           # default + monitoring + training
 
 | Endpoint | URL |
 |----------|-----|
-| Gateway | `http://localhost` |
-| Streamlit UI | `http://localhost/ui/` |
+| Gateway / UI | `http://localhost/` (public Streamlit; `/ui/` redirects here) |
 | MLflow | `http://localhost/mlflow/` |
-| Prometheus | `http://localhost:9090` |
-| Grafana | `http://localhost:3000` |
+| Prometheus | `http://localhost:9090` (monitoring profile) |
+| Grafana | `http://localhost:3000` (monitoring profile) |
 
-Health checks:
+Public production UI: [https://proseqgo.com](https://proseqgo.com). Keep TLS, DNS, and firewall details in a private ops runbook—not in this repository.
+
+Health checks (local):
 
 ```bash
-curl -sk -u admin:PASSWORD http://localhost/api/v1/health
+curl -sk -u user:PASSWORD http://localhost/api/v1/health
 curl -sk -u user:PASSWORD http://localhost/api/predict/health
 ```
 
@@ -108,20 +109,22 @@ Set in `docker-compose.yml` or overlays; do not duplicate secrets in multiple fi
 
 ## Networking and routing
 
-NGINX is the only public ingress (port 80). Internal services communicate on the `proseqgo` network.
+NGINX is the application ingress inside Compose. Terminate TLS and restrict ports at the host or edge proxy.
 
-| Gateway path | Upstream |
-|--------------|----------|
-| `/ui/` | `streamlit-ui` |
-| `/api/v1/*` | `embedding-api:8000` |
-| `/api/predict/*` | `go-prediction-api:8000` |
-| `/api/train/*` | `trainer-api:8000` (training profile) |
-| `/mlflow/` | `mlflow:5000` |
+| Gateway path | Upstream | Notes |
+|--------------|----------|-------|
+| `/` | `streamlit-ui` | Public UI |
+| `/ui/` | redirect → `/` | Compatibility |
+| `/api/v1/*` | `embedding-api:8000` | Auth required (admin for most routes; user for sync predict-go) |
+| `/api/predict/*` | `go-prediction-api:8000` | Auth required |
+| `/api/train/*` | `trainer-api:8000` | Training profile only |
+| `/mlflow/` | `mlflow:5000` | Admin auth |
 
 Auth tiers:
 
-- **Admin:** `/api/v1/*`, `/api/train*`, `/mlflow/`
-- **User:** `/api/predict/*`, sync predict-go endpoints
+- **Admin:** most `/api/v1/*` job/admin routes, `/api/train*`, `/mlflow/`
+- **User:** `/api/predict/*`, `/api/v1/predict-go-from-sequences`, `/api/v1/predict-go-from-fasta`
+- **Public:** `/` (Streamlit UI)
 
 See [nginx/README.md](../nginx/README.md) for rate limits and body size caps.
 
@@ -133,7 +136,11 @@ Single host, local volumes, all services in Compose. Best for development and re
 
 ### 2. API-first production inference
 
-Run: `nginx`, `embedding-api`, `embedding-worker`, `go-prediction-api`, `mlflow`, data stores. Omit `training` profile in production inference clusters; retrain on separate compute.
+- Strong unique `GATEWAY_*`, Postgres, and MinIO secrets; rotate when staff changes
+- Distinct admin vs user gateway accounts
+- TLS certificates and DNS managed outside this repo
+- Modal (or other) cloud credentials only in host env / secret store
+- Health-check UI and predict APIs after each deploy
 
 ### 3. Training separated from serving
 
